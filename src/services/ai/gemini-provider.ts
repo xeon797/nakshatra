@@ -46,7 +46,7 @@ export class GeminiProvider implements AiModelProvider {
   private client: GoogleGenerativeAI | null = null;
   private apiKey: string;
 
-  constructor(apiKey?: string, defaultModel = process.env.GEMINI_MODEL || 'gemini-3.8-flash') {
+  constructor(apiKey?: string, defaultModel = process.env.GEMINI_MODEL || 'gemini-3.6-flash') {
     this.apiKey = apiKey || process.env.GEMINI_API_KEY || '';
     this.defaultModel = defaultModel;
     if (this.apiKey && this.apiKey.trim() !== '') {
@@ -64,19 +64,51 @@ export class GeminiProvider implements AiModelProvider {
     return this.client;
   }
 
-  async generateText(prompt: string, options?: AiCallOptions): Promise<AiResponse> {
+  private async executeGenerate(
+    prompt: string,
+    modelName: string,
+    config: any
+  ) {
     const client = this.ensureClient();
+    try {
+      const model = client.getGenerativeModel({
+        model: modelName,
+        ...config,
+      });
+      return await withRetry(() => model.generateContent(prompt));
+    } catch (err: any) {
+      // Automatic fallback if primary configured model encounters 503, 404, or 429 quota exhaustion
+      if (
+        modelName !== 'gemini-3.6-flash' &&
+        (err?.status === 503 ||
+          err?.status === 404 ||
+          err?.status === 429 ||
+          err?.message?.includes('503') ||
+          err?.message?.includes('404') ||
+          err?.message?.includes('429') ||
+          err?.message?.includes('Quota exceeded') ||
+          err?.message?.includes('RESOURCE_EXHAUSTED'))
+      ) {
+        console.warn(`[GeminiProvider] Primary model "${modelName}" unavailable (${err.message}). Falling back to gemini-3.6-flash.`);
+        const fallback = client.getGenerativeModel({
+          model: 'gemini-3.6-flash',
+          ...config,
+        });
+        return await withRetry(() => fallback.generateContent(prompt));
+      }
+      throw err;
+    }
+  }
+
+  async generateText(prompt: string, options?: AiCallOptions): Promise<AiResponse> {
     const modelName = options?.modelOverride || this.defaultModel;
-    const model = client.getGenerativeModel({
-      model: modelName,
+    const result = await this.executeGenerate(prompt, modelName, {
       systemInstruction: options?.systemPrompt,
       generationConfig: {
         temperature: options?.temperature ?? 0.2,
         maxOutputTokens: options?.maxTokens ?? 2048,
       },
     });
-
-    const result = await withRetry(() => model.generateContent(prompt));
     const text = result.response.text();
     const usage = result.response.usageMetadata;
 
@@ -94,10 +126,9 @@ export class GeminiProvider implements AiModelProvider {
     schema: z.ZodType<T>,
     options?: AiCallOptions
   ): Promise<AiStructuredResponse<T>> {
-    const client = this.ensureClient();
     const modelName = options?.modelOverride || this.defaultModel;
-    const model = client.getGenerativeModel({
-      model: modelName,
+    const structuredPrompt = `${prompt}\n\nYou MUST return valid JSON adhering strictly to the expected schema without any markdown formatting or commentary.`;
+    const result = await this.executeGenerate(structuredPrompt, modelName, {
       systemInstruction: options?.systemPrompt,
       generationConfig: {
         temperature: options?.temperature ?? 0.1,
@@ -105,9 +136,6 @@ export class GeminiProvider implements AiModelProvider {
         responseMimeType: 'application/json',
       },
     });
-
-    const structuredPrompt = `${prompt}\n\nYou MUST return valid JSON adhering strictly to the expected schema without any markdown formatting or commentary.`;
-    const result = await withRetry(() => model.generateContent(structuredPrompt));
     const rawText = result.response.text();
     const usage = result.response.usageMetadata;
 

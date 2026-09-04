@@ -34,3 +34,44 @@ export function verifyAdminSecret(providedSecret: string | null | undefined): bo
   const expectedSecret = getAdminSecret();
   return timingSafeCompare(providedSecret.trim(), expectedSecret.trim());
 }
+
+/**
+ * Returns the configured cron secret from environment variables
+ */
+export function getCronSecret(): string {
+  return process.env.CRON_SECRET || 'dev-cron-secret-nakshatra';
+}
+
+/**
+ * Verifies whether an incoming request is authorized with CRON_SECRET.
+ * Supports:
+ * 1. Authorization: Bearer <CRON_SECRET>
+ * 2. ?secret=<CRON_SECRET> query parameter
+ */
+export function verifyCronSecret(req: Request): boolean {
+  const expectedSecret = getCronSecret();
+  if (!expectedSecret) return false;
+
+  // 1. Check Bearer token header
+  const authHeader = req.headers.get('authorization');
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const token = authHeader.slice(7).trim();
+    if (timingSafeCompare(token, expectedSecret.trim())) {
+      return true;
+    }
+  }
+
+  // 2. Check query parameter
+  try {
+    const url = new URL(req.url);
+    const secretParam = url.searchParams.get('secret');
+    if (secretParam && timingSafeCompare(secretParam.trim(), expectedSecret.trim())) {
+      return true;
+    }
+  } catch {
+    // If URL cannot be parsed
+  }
+
+  return false;
+}
+

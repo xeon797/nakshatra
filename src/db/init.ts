@@ -216,6 +216,25 @@ ALTER TABLE articles ADD COLUMN IF NOT EXISTS key_takeaways_bn TEXT[] NOT NULL D
 ALTER TABLE subscribers ADD COLUMN IF NOT EXISTS topics TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];
 ALTER TABLE subscribers ADD COLUMN IF NOT EXISTS preferred_language VARCHAR(10) NOT NULL DEFAULT 'bn';
 ALTER TABLE subscribers ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT true;
+
+CREATE TABLE IF NOT EXISTS system_locks (
+    lock_name VARCHAR(100) PRIMARY KEY,
+    locked_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at TIMESTAMPTZ NOT NULL,
+    owner_id VARCHAR(255)
+);
+
+CREATE TABLE IF NOT EXISTS newsletter_campaigns (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    subject_en VARCHAR(500) NOT NULL,
+    subject_bn VARCHAR(500) NOT NULL,
+    sent_count INT NOT NULL DEFAULT 0,
+    skipped_count INT NOT NULL DEFAULT 0,
+    failed_count INT NOT NULL DEFAULT 0,
+    recipients_count INT NOT NULL DEFAULT 0,
+    error_log TEXT,
+    sent_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 `;
 
 export const ENUM_DDL = [
@@ -224,6 +243,19 @@ export const ENUM_DDL = [
 ];
 
 let initPromise: Promise<void> | null = null;
+
+export async function isDatabaseInitialized(): Promise<boolean> {
+  try {
+    const db = await getDb();
+    const result: any = await db.execute(
+      sql`SELECT 1 FROM information_schema.tables WHERE table_name = 'sources' LIMIT 1;`
+    );
+    const rows = result?.rows || result;
+    return Array.isArray(rows) && rows.length > 0;
+  } catch {
+    return false;
+  }
+}
 
 export async function initializeDatabase(): Promise<void> {
   const db = await getDb();
@@ -247,8 +279,11 @@ export async function initializeDatabase(): Promise<void> {
 export async function ensureDatabaseInitialized(): Promise<void> {
   if (!initPromise) {
     initPromise = (async () => {
-      await initializeDatabase();
-      await seedDefaultSources();
+      const alreadyInitialized = await isDatabaseInitialized();
+      if (!alreadyInitialized) {
+        await initializeDatabase();
+        await seedDefaultSources();
+      }
     })();
   }
   return initPromise;

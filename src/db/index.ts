@@ -21,10 +21,17 @@ export async function getDb(): Promise<AppDatabase> {
 
   if (databaseUrl && !databaseUrl.includes('placeholder')) {
     try {
+      const isLocal =
+        databaseUrl.includes('localhost') ||
+        databaseUrl.includes('127.0.0.1') ||
+        databaseUrl.includes('sslmode=disable');
+
       const pool = new Pool({
         connectionString: databaseUrl,
-        max: 10,
-        idleTimeoutMillis: 30000,
+        max: process.env.DB_POOL_MAX ? parseInt(process.env.DB_POOL_MAX, 10) : 10,
+        idleTimeoutMillis: 10000,
+        connectionTimeoutMillis: 5000,
+        ssl: isLocal ? false : { rejectUnauthorized: false },
       });
       cachedDb = drizzlePg(pool, { schema });
       return cachedDb;

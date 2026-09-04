@@ -298,6 +298,27 @@ export const storySources = pgTable(
   ]
 );
 
+// 12. System Locks (Concurrency control for cron / workers)
+export const systemLocks = pgTable('system_locks', {
+  lockName: varchar('lock_name', { length: 100 }).primaryKey(),
+  lockedAt: timestamp('locked_at', { withTimezone: true }).notNull().defaultNow(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  ownerId: varchar('owner_id', { length: 255 }),
+});
+
+// 13. Newsletter Campaigns (Delivery metrics log)
+export const newsletterCampaigns = pgTable('newsletter_campaigns', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  subjectEn: varchar('subject_en', { length: 500 }).notNull(),
+  subjectBn: varchar('subject_bn', { length: 500 }).notNull(),
+  sentCount: integer('sent_count').notNull().default(0),
+  skippedCount: integer('skipped_count').notNull().default(0),
+  failedCount: integer('failed_count').notNull().default(0),
+  recipientsCount: integer('recipients_count').notNull().default(0),
+  errorLog: text('error_log'),
+  sentAt: timestamp('sent_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
 // Relations
 export const sourcesRelations = relations(sources, ({ many }) => ({
   rawArticles: many(rawArticles),

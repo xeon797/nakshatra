@@ -148,14 +148,32 @@ INVIOLABLE RULES:
 1. Grounding: You may ONLY state facts directly derived from the verified claims. Zero speculation.
 2. Inline Footnotes: For every factual statement, append an inline citation token like [^1], [^2] referencing the citation list.
 3. Originality: Write in clear, active journalistic prose. DO NOT copy more than 4 consecutive words verbatim from source text.
-4. Completeness: Ensure all citations mapped in the citations array match the [^N] numbers in the body.`;
+4. Completeness: Ensure all citations mapped in the citations array match the [^N] numbers in the body.
+
+The output MUST be a valid JSON object strictly matching this schema:
+{
+  "title": "string (Journalistic headline, max 120 chars)",
+  "deck": "string (Summary deck / subhead explaining the core development, max 250 chars)",
+  "slug": "string (URL-friendly kebab-case Latin slug)",
+  "contentMarkdown": "string (Article body in markdown with inline [^1] citations)",
+  "metaDescription": "string (SEO description under 160 chars)",
+  "citations": [
+    {
+      "citationIndex": 1,
+      "claimIndex": 0,
+      "anchorText": "Key phrase from text",
+      "primarySourceUrl": "https://example.com/source",
+      "sourcePublisher": "Publisher name"
+    }
+  ]
+}`;
 
     const userPrompt = `Story Topic: ${params.topicTitle}
 
 VERIFIED CLAIMS LIST:
 ${claimsContext}
 
-Generate the full synthesized article draft in JSON conforming to the schema.`;
+Generate the full synthesized article draft in JSON conforming strictly to the expected schema.`;
 
     try {
       const response = await this.aiProvider.generateStructured(
@@ -271,14 +289,40 @@ INVIOLABLE RULES:
 5. Slug Standard: The "slug" field MUST be strictly ASCII Latin kebab-case [a-z0-9-] suitable for clean URL sharing.
 6. Bengali Editorial Standard:
    - Modern, natural tech Bengali (avoid awkward, archaic or overly literal translations).
-   - Retain standard AI concepts transliterated or parenthesized in English (e.g. "রিজনিং মডেল (Reasoning Model)", "ফাইন-টিউনিং", "কনটেক্সট উইন্ডো", "মাল্টি-মোডাল").`;
+   - Retain standard AI concepts transliterated or parenthesized in English (e.g. "রিজনিং মডেল (Reasoning Model)", "ফাইন-টিউনিং", "কনটেক্সট উইন্ডো", "মাল্টি-মোডাল").
+
+The output MUST be a valid JSON object strictly matching this schema:
+{
+  "slug": "kebab-case-latin-slug",
+  "en": {
+    "title": "Journalistic headline in English (max 255 chars)",
+    "summary": "Executive summary deck explaining the core development",
+    "content": "Article body in English markdown with inline citations [^1]",
+    "keyTakeaways": ["Key bullet 1", "Key bullet 2"]
+  },
+  "bn": {
+    "title": "Journalistic headline in Bengali (max 255 chars)",
+    "summary": "Executive summary deck in Bengali",
+    "content": "Article body in Bengali markdown with inline citations [^1]",
+    "keyTakeaways": ["Key bullet 1 in Bengali", "Key bullet 2 in Bengali"]
+  },
+  "citations": [
+    {
+      "citationIndex": 1,
+      "claimIndex": 0,
+      "anchorText": "Key phrase from text",
+      "primarySourceUrl": "https://example.com/source",
+      "sourcePublisher": "Publisher name"
+    }
+  ]
+}`;
 
     const userPrompt = `Story Topic: ${params.topicTitle}
 
 VERIFIED CLAIMS LIST:
 ${claimsContext}
 
-Generate the full synthesized bilingual article draft in JSON conforming to the schema (with fields: slug, en, bn, citations).`;
+Generate the full synthesized bilingual article draft in JSON conforming strictly to the expected schema (with fields: slug, en, bn, citations).`;
 
     try {
       const response = await this.aiProvider.generateStructured(

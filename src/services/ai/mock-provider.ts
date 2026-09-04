@@ -72,6 +72,18 @@ export class MockAiProvider implements AiModelProvider {
         confidence: 0.95,
         reasoning: 'Heuristic fallback decision',
       },
+      // ClusterSynthesisSchema
+      {
+        isSameStory: true,
+        matchingArticleIndices: [0, 1],
+        primaryArticleIndex: 0,
+        canonicalTitle: 'Frontier AI Reasoning Breakthrough',
+        summary: 'Researchers have announced a breakthrough in autonomous reasoning capabilities across multimodal benchmarks.',
+        category: 'llm_release',
+        riskLevel: 'low',
+        importanceScore: 92,
+        reasoning: 'Verified official documentation reporting new benchmark results.',
+      },
       // FactVerificationResponseSchema
       {
         verificationStatus: 'verified_factual',
