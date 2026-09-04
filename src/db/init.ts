@@ -165,12 +165,52 @@ CREATE TABLE IF NOT EXISTS topic_subscriptions (
     cadence VARCHAR(50) NOT NULL DEFAULT 'daily',
     PRIMARY KEY (subscriber_id, topic_id)
 );
+
+CREATE TABLE IF NOT EXISTS stories (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    title VARCHAR(255) NOT NULL,
+    summary TEXT NOT NULL,
+    category VARCHAR(64) NOT NULL,
+    editorial_status editorial_status NOT NULL DEFAULT 'needs_review',
+    risk_level risk_level NOT NULL,
+    importance_score INT NOT NULL,
+    first_seen_at TIMESTAMPTZ NOT NULL,
+    last_updated_at TIMESTAMPTZ NOT NULL,
+    primary_source_id UUID REFERENCES sources(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS story_sources (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    story_id UUID NOT NULL REFERENCES stories(id) ON DELETE CASCADE,
+    raw_article_id UUID NOT NULL REFERENCES raw_articles(id) ON DELETE CASCADE,
+    is_primary BOOLEAN NOT NULL DEFAULT false,
+    CONSTRAINT uq_story_sources_story_raw UNIQUE (story_id, raw_article_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_story_sources_story_id ON story_sources(story_id);
+CREATE INDEX IF NOT EXISTS idx_story_sources_raw_article_id ON story_sources(raw_article_id);
+CREATE INDEX IF NOT EXISTS idx_stories_editorial_status ON stories(editorial_status);
+CREATE INDEX IF NOT EXISTS idx_stories_category ON stories(category);
+CREATE INDEX IF NOT EXISTS idx_stories_first_seen_at ON stories(first_seen_at);
 `;
+
+export const ENUM_DDL = [
+  `DO $$ BEGIN CREATE TYPE editorial_status AS ENUM ('auto_approved', 'needs_review', 'rejected', 'published'); EXCEPTION WHEN duplicate_object THEN null; END $$`,
+  `DO $$ BEGIN CREATE TYPE risk_level AS ENUM ('low', 'medium', 'high'); EXCEPTION WHEN duplicate_object THEN null; END $$`,
+];
 
 let initPromise: Promise<void> | null = null;
 
 export async function initializeDatabase(): Promise<void> {
   const db = await getDb();
+  for (const enumStmt of ENUM_DDL) {
+    try {
+      await db.execute(sql.raw(enumStmt));
+    } catch {
+      // Ignored if type already exists
+    }
+  }
+
   const statements = INIT_DDL.split(';')
     .map((s) => s.trim())
     .filter((s) => s.length > 0);

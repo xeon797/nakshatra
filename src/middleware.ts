@@ -12,6 +12,7 @@ export function middleware(request: NextRequest) {
   // Determine if this is a protected admin route or sensitive API mutation route
   const isProtectedAdminPage = pathname.startsWith('/admin');
   const isProtectedApiRoute =
+    pathname.startsWith('/api/admin') ||
     pathname.startsWith('/api/pipeline') ||
     pathname.startsWith('/api/articles/') && (pathname.endsWith('/approve') || pathname.endsWith('/reject'));
 
@@ -19,10 +20,15 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // 1. Check Authorization header (Bearer token)
+  // 1. Check Authorization header (Bearer token) or direct ADMIN_API_SECRET header
   const authHeader = request.headers.get('authorization');
-  let tokenFromHeader: string | null = null;
-  if (authHeader && authHeader.startsWith('Bearer ')) {
+  const directHeader =
+    request.headers.get('admin_api_secret') ||
+    request.headers.get('x-admin-secret') ||
+    request.headers.get('admin-api-secret');
+
+  let tokenFromHeader: string | null = directHeader;
+  if (!tokenFromHeader && authHeader && authHeader.startsWith('Bearer ')) {
     tokenFromHeader = authHeader.substring(7).trim();
   }
 
@@ -37,7 +43,7 @@ export function middleware(request: NextRequest) {
       return NextResponse.json(
         {
           success: false,
-          error: 'Unauthorized: Invalid or missing admin credentials. Provide a valid Bearer token or login.',
+          error: 'Unauthorized: Invalid or missing admin credentials. Provide a valid ADMIN_API_SECRET header or login.',
         },
         { status: 401 }
       );
@@ -53,5 +59,5 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/admin/:path*', '/api/pipeline/:path*', '/api/articles/:path*'],
+  matcher: ['/admin/:path*', '/api/admin/:path*', '/api/pipeline/:path*', '/api/articles/:path*'],
 };

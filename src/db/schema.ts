@@ -10,6 +10,8 @@ import {
   uuid,
   index,
   primaryKey,
+  unique,
+  pgEnum,
   customType,
 } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
@@ -234,9 +236,60 @@ export const topicSubscriptions = pgTable(
   ]
 );
 
+// 11. Multi-Source Story Clusters & Editorial Stories (Phase 2)
+export const editorialStatusEnum = pgEnum('editorial_status', [
+  'auto_approved',
+  'needs_review',
+  'rejected',
+  'published',
+]);
+
+export const riskLevelEnum = pgEnum('risk_level', [
+  'low',
+  'medium',
+  'high',
+]);
+
+export const stories = pgTable(
+  'stories',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    title: varchar('title', { length: 255 }).notNull(),
+    summary: text('summary').notNull(),
+    category: varchar('category', { length: 64 }).notNull(), // 'llm_release', 'research', 'infra', 'policy', 'agentic'
+    editorialStatus: editorialStatusEnum('editorial_status').notNull().default('needs_review'),
+    riskLevel: riskLevelEnum('risk_level').notNull(),
+    importanceScore: integer('importance_score').notNull(), // 0-100
+    firstSeenAt: timestamp('first_seen_at', { withTimezone: true }).notNull(),
+    lastUpdatedAt: timestamp('last_updated_at', { withTimezone: true }).notNull(),
+    primarySourceId: uuid('primary_source_id').references(() => sources.id, { onDelete: 'set null' }),
+  },
+  (table) => [
+    index('idx_stories_editorial_status').on(table.editorialStatus),
+    index('idx_stories_category').on(table.category),
+    index('idx_stories_first_seen_at').on(table.firstSeenAt),
+  ]
+);
+
+export const storySources = pgTable(
+  'story_sources',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    storyId: uuid('story_id').notNull().references(() => stories.id, { onDelete: 'cascade' }),
+    rawArticleId: uuid('raw_article_id').notNull().references(() => rawArticles.id, { onDelete: 'cascade' }),
+    isPrimary: boolean('is_primary').notNull().default(false),
+  },
+  (table) => [
+    unique('uq_story_sources_story_raw').on(table.storyId, table.rawArticleId),
+    index('idx_story_sources_story_id').on(table.storyId),
+    index('idx_story_sources_raw_article_id').on(table.rawArticleId),
+  ]
+);
+
 // Relations
 export const sourcesRelations = relations(sources, ({ many }) => ({
   rawArticles: many(rawArticles),
+  stories: many(stories),
 }));
 
 export const rawArticlesRelations = relations(rawArticles, ({ one, many }) => ({
@@ -245,12 +298,32 @@ export const rawArticlesRelations = relations(rawArticles, ({ one, many }) => ({
     references: [sources.id],
   }),
   clusterMappings: many(storyClusterSources),
+  storyLinks: many(storySources),
 }));
 
 export const storyClustersRelations = relations(storyClusters, ({ many }) => ({
   sources: many(storyClusterSources),
   claims: many(claims),
   articles: many(articles),
+}));
+
+export const storiesRelations = relations(stories, ({ one, many }) => ({
+  primarySource: one(sources, {
+    fields: [stories.primarySourceId],
+    references: [sources.id],
+  }),
+  sources: many(storySources),
+}));
+
+export const storySourcesRelations = relations(storySources, ({ one }) => ({
+  story: one(stories, {
+    fields: [storySources.storyId],
+    references: [stories.id],
+  }),
+  rawArticle: one(rawArticles, {
+    fields: [storySources.rawArticleId],
+    references: [rawArticles.id],
+  }),
 }));
 
 export const claimsRelations = relations(claims, ({ one, many }) => ({

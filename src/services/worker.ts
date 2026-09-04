@@ -3,6 +3,7 @@ import { getDb } from '../db';
 import * as schema from '../db/schema';
 import { ensureDatabaseInitialized } from '../db/init';
 import { eq } from 'drizzle-orm';
+export { AutonomousPhase2Worker, startPhase2Daemon } from '../server/worker';
 
 export interface WorkerRunSummary {
   sourcesPolled: number;
