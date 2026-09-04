@@ -1,5 +1,6 @@
 import { getDb } from './index';
 import { sql } from 'drizzle-orm';
+import { seedDefaultSources } from '../services/ingestion/seed-sources';
 
 export const INIT_DDL = `
 CREATE TABLE IF NOT EXISTS sources (
@@ -166,6 +167,8 @@ CREATE TABLE IF NOT EXISTS topic_subscriptions (
 );
 `;
 
+let initPromise: Promise<void> | null = null;
+
 export async function initializeDatabase(): Promise<void> {
   const db = await getDb();
   const statements = INIT_DDL.split(';')
@@ -175,4 +178,18 @@ export async function initializeDatabase(): Promise<void> {
   for (const statement of statements) {
     await db.execute(sql.raw(statement));
   }
+}
+
+export async function ensureDatabaseInitialized(): Promise<void> {
+  if (!initPromise) {
+    initPromise = (async () => {
+      await initializeDatabase();
+      await seedDefaultSources();
+    })();
+  }
+  return initPromise;
+}
+
+export function resetInitForTesting(): void {
+  initPromise = null;
 }

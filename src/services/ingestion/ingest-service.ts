@@ -2,7 +2,7 @@ import { getDb } from '../../db';
 import * as schema from '../../db/schema';
 import { RssFeedAdapter, ParsedFeedItem } from './rss-adapter';
 import { isNearDuplicate } from './dedup';
-import { eq, desc } from 'drizzle-orm';
+import { eq, desc, or } from 'drizzle-orm';
 
 export interface IngestionResult {
   sourceId: string;
@@ -63,12 +63,27 @@ export class IngestionService {
       .limit(100);
 
     for (const item of items) {
-      // 1. Exact Deduplication Check (URL or SHA-256 Hash)
-      const exactMatch = recentArticles.find(
+      // 1. Exact Deduplication Check (URL or SHA-256 Hash across entire database)
+      const exactInBatch = recentArticles.find(
         (r) => r.canonicalUrl === item.canonicalUrl || r.contentHash === item.contentHash
       );
+      if (exactInBatch) {
+        result.exactDuplicatesSkipped++;
+        continue;
+      }
 
-      if (exactMatch) {
+      const [exactMatchInDb] = await db
+        .select({ id: schema.rawArticles.id })
+        .from(schema.rawArticles)
+        .where(
+          or(
+            eq(schema.rawArticles.canonicalUrl, item.canonicalUrl),
+            eq(schema.rawArticles.contentHash, item.contentHash)
+          )
+        )
+        .limit(1);
+
+      if (exactMatchInDb) {
         result.exactDuplicatesSkipped++;
         continue;
       }

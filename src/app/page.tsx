@@ -1,14 +1,12 @@
 import Link from 'next/link';
 import { ArticleManager } from '../services/editorial/article-manager';
-import { initializeDatabase } from '../db/init';
-import { seedDefaultSources } from '../services/ingestion/seed-sources';
+import { ensureDatabaseInitialized } from '../db/init';
 import { ShieldCheck, Clock, ArrowRight, Sparkles, ExternalLink } from 'lucide-react';
 
 export const dynamic = 'force-dynamic';
 
 export default async function HomePage() {
-  await initializeDatabase();
-  await seedDefaultSources();
+  await ensureDatabaseInitialized();
 
   const articleManager = new ArticleManager();
   const publishedArticles = await articleManager.getPublishedArticles(20, 0);

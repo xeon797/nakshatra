@@ -1,8 +1,8 @@
 import { notFound } from 'next/navigation';
 import { ArticleManager } from '../../../services/editorial/article-manager';
-import { initializeDatabase } from '../../../db/init';
+import { ensureDatabaseInitialized } from '../../../db/init';
 import Link from 'next/link';
-import { ShieldCheck, Clock, ExternalLink, ArrowLeft, CheckCircle2, Bookmark } from 'lucide-react';
+import { ShieldCheck, Clock, ExternalLink, ArrowLeft, Bookmark } from 'lucide-react';
 import type { Metadata } from 'next';
 
 export const dynamic = 'force-dynamic';
@@ -11,8 +11,30 @@ interface Props {
   params: Promise<{ slug: string }>;
 }
 
+function renderParagraphWithCitations(paragraph: string) {
+  const parts = paragraph.split(/(\[\^?\d+\])/g);
+  return parts.map((part, index) => {
+    const match = part.match(/\[\^?(\d+)\]/);
+    if (match) {
+      const citNum = match[1];
+      return (
+        <sup key={index} id={`ref-${citNum}`} className="scroll-mt-24">
+          <a
+            href={`#citation-${citNum}`}
+            className="text-sky-400 hover:text-sky-300 font-mono text-xs font-semibold px-0.5 hover:underline"
+            title={`Jump to verified source citation [${citNum}]`}
+          >
+            [{citNum}]
+          </a>
+        </sup>
+      );
+    }
+    return part;
+  });
+}
+
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
-  await initializeDatabase();
+  await ensureDatabaseInitialized();
   const { slug } = await params;
   const manager = new ArticleManager();
   const article = await manager.getArticleBySlug(slug);
@@ -32,7 +54,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 }
 
 export default async function ArticlePage({ params }: Props) {
-  await initializeDatabase();
+  await ensureDatabaseInitialized();
   const { slug } = await params;
   const manager = new ArticleManager();
   const article = await manager.getArticleBySlug(slug);
@@ -43,7 +65,7 @@ export default async function ArticlePage({ params }: Props) {
 
   const confidencePercent = Math.round(parseFloat(article.confidenceScore) * 100);
 
-  // Parse markdown body paragraphs and citations
+  // Parse markdown body paragraphs
   const paragraphs = article.contentMarkdown.split('\n\n').filter((p) => p.trim().length > 0);
 
   // Schema.org JSON-LD structured data for SEO
@@ -64,12 +86,15 @@ export default async function ArticlePage({ params }: Props) {
     },
   };
 
+  // Prevent script tag breakout XSS in JSON-LD
+  const sanitizedJsonLd = JSON.stringify(jsonLd).replace(/</g, '\\u003c');
+
   return (
     <article className="space-y-8 max-w-4xl mx-auto pb-16">
       {/* JSON-LD Script */}
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+        dangerouslySetInnerHTML={{ __html: sanitizedJsonLd }}
       />
 
       {/* Back Link */}
@@ -108,11 +133,11 @@ export default async function ArticlePage({ params }: Props) {
         </p>
       </header>
 
-      {/* Article Content */}
+      {/* Article Content with Interactive Footnote Citations */}
       <div className="prose prose-invert max-w-none text-slate-200 text-base sm:text-lg leading-relaxed space-y-6">
         {paragraphs.map((p, idx) => (
           <p key={idx} className="leading-relaxed">
-            {p}
+            {renderParagraphWithCitations(p)}
           </p>
         ))}
       </div>
@@ -130,18 +155,19 @@ export default async function ArticlePage({ params }: Props) {
         </div>
 
         <p className="text-xs text-slate-400 leading-relaxed">
-          Every statement in this report is bound to primary documentation. Under NAKSHATRA?s verification invariant, no hallucinated or uncorroborated factual claims are permitted.
+          Every statement in this report is bound to primary documentation. Under NAKSHATRA’s verification invariant, no hallucinated or uncorroborated factual claims are permitted.
         </p>
 
         <div className="space-y-4">
           {article.citations.map((citation) => (
             <div
               key={citation.id}
-              className="p-4 rounded-xl bg-slate-950/60 border border-slate-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+              id={`citation-${citation.citationIndex}`}
+              className="p-4 rounded-xl bg-slate-950/60 border border-slate-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3 scroll-mt-24 transition-colors hover:border-sky-500/40"
             >
               <div className="space-y-1">
                 <div className="flex items-center gap-2">
-                  <span className="w-5 h-5 rounded-full bg-sky-500/20 text-sky-400 font-mono text-xs flex items-center justify-center font-bold">
+                  <span className="w-6 h-6 rounded-full bg-sky-500/20 text-sky-400 font-mono text-xs flex items-center justify-center font-bold">
                     [{citation.citationIndex}]
                   </span>
                   <span className="font-semibold text-sm text-white">{citation.anchorText}</span>

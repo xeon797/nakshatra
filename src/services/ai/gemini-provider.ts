@@ -2,6 +2,44 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { z } from 'zod';
 import { AiModelProvider, AiCallOptions, AiResponse, AiStructuredResponse } from './provider';
 
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  maxRetries = 3,
+  baseDelayMs = 1000
+): Promise<T> {
+  let attempt = 0;
+  while (true) {
+    try {
+      return await fn();
+    } catch (error: any) {
+      attempt++;
+      const isRetryable =
+        attempt <= maxRetries &&
+        (error?.status === 429 ||
+          error?.status === 503 ||
+          error?.status === 500 ||
+          error?.status === 502 ||
+          error?.status === 504 ||
+          (typeof error?.message === 'string' &&
+            (error.message.includes('429') ||
+              error.message.includes('503') ||
+              error.message.includes('500') ||
+              error.message.includes('RESOURCE_EXHAUSTED') ||
+              error.message.includes('UNAVAILABLE') ||
+              error.message.includes('fetch failed') ||
+              error.message.includes('overloaded'))));
+
+      if (!isRetryable) {
+        throw error;
+      }
+
+      const jitter = Math.floor(Math.random() * 200);
+      const delay = baseDelayMs * Math.pow(2, attempt - 1) + jitter;
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
+}
+
 export class GeminiProvider implements AiModelProvider {
   readonly providerName = 'google_gemini';
   readonly defaultModel: string;
@@ -38,7 +76,7 @@ export class GeminiProvider implements AiModelProvider {
       },
     });
 
-    const result = await model.generateContent(prompt);
+    const result = await withRetry(() => model.generateContent(prompt));
     const text = result.response.text();
     const usage = result.response.usageMetadata;
 
@@ -69,7 +107,7 @@ export class GeminiProvider implements AiModelProvider {
     });
 
     const structuredPrompt = `${prompt}\n\nYou MUST return valid JSON adhering strictly to the expected schema without any markdown formatting or commentary.`;
-    const result = await model.generateContent(structuredPrompt);
+    const result = await withRetry(() => model.generateContent(structuredPrompt));
     const rawText = result.response.text();
     const usage = result.response.usageMetadata;
 

@@ -9,7 +9,10 @@ export const VerificationVerdictSchema = z.object({
   confidenceScore: z.number().min(0).max(1).default(0.95),
 });
 
-export type VerificationVerdict = z.infer<typeof VerificationVerdictSchema>;
+export type VerificationVerdict = z.infer<typeof VerificationVerdictSchema> & {
+  promptTokens?: number;
+  completionTokens?: number;
+};
 
 export interface SourceDocument {
   id: string;
@@ -81,6 +84,8 @@ Determine whether the source SUPPORTS, REFUTES, or is INCONCLUSIVE regarding the
     return {
       ...response.data,
       confidenceScore: response.data.confidenceScore ?? 0.95,
+      promptTokens: response.promptTokens,
+      completionTokens: response.completionTokens,
     };
   }
 
@@ -105,86 +110,104 @@ Determine whether the source SUPPORTS, REFUTES, or is INCONCLUSIVE regarding the
     }
 
     const outcomes: VerifiedClaimOutcome[] = [];
+    let totalPromptTokens = 0;
+    let totalCompletionTokens = 0;
 
-    for (let i = 0; i < params.claims.length; i++) {
-      const claim = params.claims[i];
-      const evidences: VerifiedClaimOutcome['evidences'] = [];
-      let supportsCount = 0;
-      let hasPrimarySupport = false;
-      let refutesCount = 0;
-      let maxConfidence = 0;
+    try {
+      for (let i = 0; i < params.claims.length; i++) {
+        const claim = params.claims[i];
+        const evidences: VerifiedClaimOutcome['evidences'] = [];
+        let supportsCount = 0;
+        let hasPrimarySupport = false;
+        let refutesCount = 0;
+        let maxConfidence = 0;
 
-      for (const source of params.sources) {
-        const verdict = await this.verifyClaimAgainstSource({
-          claimText: claim.claimText,
-          source,
-        });
+        for (const source of params.sources) {
+          const verdict = await this.verifyClaimAgainstSource({
+            claimText: claim.claimText,
+            source,
+          });
 
-        evidences.push({
-          sourceUrl: source.url,
-          sourceName: source.sourceName,
-          sourceTier: source.sourceTier,
-          verbatimExcerpt: verdict.verbatimExcerpt,
-          entailment: verdict.entailment,
-          rationale: verdict.rationale,
-        });
+          totalPromptTokens += verdict.promptTokens ?? 0;
+          totalCompletionTokens += verdict.completionTokens ?? 0;
 
-        if (verdict.entailment === 'supports') {
-          supportsCount++;
-          if (source.sourceTier === 'tier_1_primary') {
-            hasPrimarySupport = true;
+          evidences.push({
+            sourceUrl: source.url,
+            sourceName: source.sourceName,
+            sourceTier: source.sourceTier,
+            verbatimExcerpt: verdict.verbatimExcerpt,
+            entailment: verdict.entailment,
+            rationale: verdict.rationale,
+          });
+
+          if (verdict.entailment === 'supports') {
+            supportsCount++;
+            if (source.sourceTier === 'tier_1_primary') {
+              hasPrimarySupport = true;
+            }
+            if (verdict.confidenceScore > maxConfidence) {
+              maxConfidence = verdict.confidenceScore;
+            }
+          } else if (verdict.entailment === 'refutes') {
+            refutesCount++;
           }
-          if (verdict.confidenceScore > maxConfidence) {
-            maxConfidence = verdict.confidenceScore;
-          }
-        } else if (verdict.entailment === 'refutes') {
-          refutesCount++;
         }
+
+        let verificationStatus: VerifiedClaimOutcome['verificationStatus'] = 'unverified';
+
+        if (refutesCount > 0 && supportsCount === 0) {
+          verificationStatus = 'debunked';
+        } else if (refutesCount > 0 && supportsCount > 0) {
+          verificationStatus = 'disputed';
+        } else if (hasPrimarySupport) {
+          verificationStatus = 'verified_primary';
+        } else if (supportsCount >= 2) {
+          verificationStatus = 'verified_corroborated';
+        } else if (supportsCount === 1) {
+          verificationStatus = 'verified_primary'; // Single verified source in MVP
+        }
+
+        outcomes.push({
+          claimText: claim.claimText,
+          claimType: claim.claimType,
+          verificationStatus,
+          confidenceScore: maxConfidence || 0.5,
+          evidences,
+        });
       }
 
-      let verificationStatus: VerifiedClaimOutcome['verificationStatus'] = 'unverified';
+      if (runId) {
+        await this.logger.logStep({
+          agentRunId: runId,
+          stepNumber: 1,
+          actionName: 'verify_claims_graph',
+          inputPayload: { claimCount: params.claims.length, sourceCount: params.sources.length },
+          outputPayload: {
+            verifiedCount: outcomes.filter((o) => o.verificationStatus.startsWith('verified')).length,
+          },
+          rationale: `Verified ${outcomes.length} claims across ${params.sources.length} sources.`,
+        });
 
-      if (refutesCount > 0 && supportsCount === 0) {
-        verificationStatus = 'debunked';
-      } else if (refutesCount > 0 && supportsCount > 0) {
-        verificationStatus = 'disputed';
-      } else if (hasPrimarySupport) {
-        verificationStatus = 'verified_primary';
-      } else if (supportsCount >= 2) {
-        verificationStatus = 'verified_corroborated';
-      } else if (supportsCount === 1) {
-        verificationStatus = 'verified_primary'; // Single verified source in MVP
+        await this.logger.finishRun(runId, {
+          status: 'success',
+          promptTokens: totalPromptTokens,
+          completionTokens: totalCompletionTokens,
+          latencyMs: Date.now() - startTime,
+        });
       }
 
-      outcomes.push({
-        claimText: claim.claimText,
-        claimType: claim.claimType,
-        verificationStatus,
-        confidenceScore: maxConfidence || 0.5,
-        evidences,
-      });
+      return outcomes;
+    } catch (err: any) {
+      if (runId) {
+        await this.logger.finishRun(runId, {
+          status: 'failed',
+          promptTokens: totalPromptTokens,
+          completionTokens: totalCompletionTokens,
+          latencyMs: Date.now() - startTime,
+          errorMessage: err.message || String(err),
+        });
+      }
+      throw err;
     }
-
-    if (runId) {
-      await this.logger.logStep({
-        agentRunId: runId,
-        stepNumber: 1,
-        actionName: 'verify_claims_graph',
-        inputPayload: { claimCount: params.claims.length, sourceCount: params.sources.length },
-        outputPayload: {
-          verifiedCount: outcomes.filter((o) => o.verificationStatus.startsWith('verified')).length,
-        },
-        rationale: `Verified ${outcomes.length} claims across ${params.sources.length} sources.`,
-      });
-
-      await this.logger.finishRun(runId, {
-        status: 'success',
-        promptTokens: 500 * params.claims.length,
-        completionTokens: 150 * params.claims.length,
-        latencyMs: Date.now() - startTime,
-      });
-    }
-
-    return outcomes;
   }
 }

@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ArticleManager } from '../../../../../services/editorial/article-manager';
-import { initializeDatabase } from '../../../../../db/init';
+import { ensureDatabaseInitialized } from '../../../../../db/init';
 
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    await initializeDatabase();
+    await ensureDatabaseInitialized();
     const { id } = await params;
     const manager = new ArticleManager();
     await manager.approveArticle(id, 'editor_admin');

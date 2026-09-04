@@ -23,13 +23,46 @@ export class ArticleManager {
         ? (totalConfidence / params.verifiedClaims.length).toFixed(2)
         : '0.90';
 
+    // Validate citation grounding invariant: every citation must reference a valid verified claim
+    for (const cit of draft.citations) {
+      if (
+        cit.claimIndex === undefined ||
+        cit.claimIndex === null ||
+        cit.claimIndex < 0 ||
+        cit.claimIndex >= params.verifiedClaims.length ||
+        !params.verifiedClaims[cit.claimIndex]
+      ) {
+        throw new Error(
+          `Grounding Invariant Violation: Citation index [${cit.citationIndex}] references an invalid or non-existent claim index (${cit.claimIndex}). Draft rejected.`
+        );
+      }
+    }
+
+    // Slug collision handling: check if slug exists, and if so, append random unique suffix
+    let uniqueSlug = draft.slug;
+    let collisionAttempts = 0;
+    while (true) {
+      const existing = await db
+        .select({ id: schema.articles.id })
+        .from(schema.articles)
+        .where(eq(schema.articles.slug, uniqueSlug))
+        .limit(1);
+
+      if (existing.length === 0) break;
+
+      collisionAttempts++;
+      const suffix = Math.random().toString(36).substring(2, 7);
+      uniqueSlug = `${draft.slug}-${suffix}`;
+      if (collisionAttempts >= 5) break;
+    }
+
     // 1. Insert Article
     const [insertedArticle] = await db
       .insert(schema.articles)
       .values({
         storyClusterId: params.storyClusterId,
         title: draft.title,
-        slug: draft.slug,
+        slug: uniqueSlug,
         deck: draft.deck,
         contentMarkdown: draft.contentMarkdown,
         metaDescription: draft.metaDescription,

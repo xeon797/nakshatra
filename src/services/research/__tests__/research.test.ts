@@ -188,6 +188,18 @@ describe('Feature 3: AI Research, Claim Extraction & Fact Verification Agent', (
       expect(insertedClaim.id).toBeDefined();
       expect(insertedEvidence.claimId).toBe(insertedClaim.id);
       expect(insertedEvidence.entailment).toBe('supports');
+
+      // Verify audit telemetry recorded real accumulated tokens
+      const runs = await db
+        .select()
+        .from(schema.agentRuns)
+        .where(eq(schema.agentRuns.agentName, 'FactVerificationAgent'));
+
+      expect(runs.length).toBeGreaterThan(0);
+      const latestRun = runs[runs.length - 1];
+      expect(latestRun.status).toBe('success');
+      expect(latestRun.promptTokens).toBeGreaterThan(0);
+      expect(latestRun.completionTokens).toBe(150);
     });
   });
 });

@@ -1,5 +1,5 @@
 import { ArticleManager } from '../../../services/editorial/article-manager';
-import { initializeDatabase } from '../../../db/init';
+import { ensureDatabaseInitialized } from '../../../db/init';
 import { getDb } from '../../../db';
 import * as schema from '../../../db/schema';
 import { eq } from 'drizzle-orm';
@@ -8,7 +8,7 @@ import NewsroomClient from './NewsroomClient';
 export const dynamic = 'force-dynamic';
 
 export default async function NewsroomPage() {
-  await initializeDatabase();
+  await ensureDatabaseInitialized();
   const manager = new ArticleManager();
   const db = await getDb();
 

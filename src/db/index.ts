@@ -3,6 +3,7 @@ import { drizzle as drizzlePglite } from 'drizzle-orm/pglite';
 import { PGlite } from '@electric-sql/pglite';
 import pg from 'pg';
 import * as schema from './schema';
+import { resetInitForTesting } from './init';
 
 const { Pool } = pg;
 
@@ -43,6 +44,7 @@ export async function getDb(): Promise<AppDatabase> {
 export function resetDbForTesting(): void {
   cachedDb = null;
   pgliteInstance = null;
+  resetInitForTesting();
 }
 
 export { schema };

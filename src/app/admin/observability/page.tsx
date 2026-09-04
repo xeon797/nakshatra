@@ -1,4 +1,4 @@
-import { initializeDatabase } from '../../../db/init';
+import { ensureDatabaseInitialized } from '../../../db/init';
 import { getDb } from '../../../db';
 import * as schema from '../../../db/schema';
 import { desc } from 'drizzle-orm';
@@ -7,7 +7,7 @@ import { Activity, Clock, Cpu, Coins, CheckCircle2, XCircle } from 'lucide-react
 export const dynamic = 'force-dynamic';
 
 export default async function ObservabilityPage() {
-  await initializeDatabase();
+  await ensureDatabaseInitialized();
   const db = await getDb();
 
   const runs = await db

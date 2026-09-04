@@ -214,5 +214,109 @@ describe('Feature 4: Autonomous Editorial Synthesis & Plagiarism Gate', () => {
       expect(revisions.length).toBeGreaterThanOrEqual(2);
       expect(revisions[1].editorUserId).toBe('editor_alice');
     });
+
+    it('rejects draft with ungrounded citations (invalid claimIndex)', async () => {
+      const manager = new ArticleManager();
+      const verifiedClaims: VerifiedClaimInput[] = [
+        {
+          claimText: 'Verified claim text.',
+          claimType: 'architecture',
+          confidenceScore: 0.99,
+          primarySourceUrl: 'https://deepmind.google',
+          sourcePublisher: 'Google DeepMind',
+          verbatimExcerpt: 'Excerpt',
+        },
+      ];
+
+      const synthesisResultWithInvalidCitation = {
+        draft: {
+          title: 'Ungrounded Article',
+          deck: 'Deck',
+          slug: 'ungrounded-article-test',
+          contentMarkdown: 'Ungrounded claim text[^1].',
+          metaDescription: 'Meta',
+          citations: [
+            {
+              citationIndex: 1,
+              claimIndex: 99, // INVALID claim index out of bounds!
+              anchorText: 'Invalid',
+              primarySourceUrl: 'https://example.com',
+              sourcePublisher: 'Unknown',
+            },
+          ],
+        },
+        plagiarismAudit: {
+          maxSimilarity: 0.02,
+          isAcceptable: true,
+          longestCommonPhraseLength: 1,
+          offendingPhrases: [],
+        },
+        readingTimeMinutes: 1,
+      };
+
+      await expect(
+        manager.saveDraftArticle({
+          synthesisResult: synthesisResultWithInvalidCitation,
+          verifiedClaims,
+        })
+      ).rejects.toThrow(/Grounding Invariant Violation/);
+    });
+
+    it('handles slug collisions gracefully by generating unique slug suffix', async () => {
+      const manager = new ArticleManager();
+      const verifiedClaims: VerifiedClaimInput[] = [
+        {
+          claimText: 'Verified claim text.',
+          claimType: 'product_release',
+          confidenceScore: 0.95,
+          primarySourceUrl: 'https://example.com',
+          sourcePublisher: 'Example',
+          verbatimExcerpt: 'Excerpt',
+        },
+      ];
+
+      const baseResult = {
+        draft: {
+          title: 'Unique Slug Collision Test',
+          deck: 'First article deck',
+          slug: 'collision-test-slug',
+          contentMarkdown: 'Article content 1.',
+          metaDescription: 'Meta 1',
+          citations: [
+            {
+              citationIndex: 1,
+              claimIndex: 0,
+              anchorText: 'Example',
+              primarySourceUrl: 'https://example.com',
+              sourcePublisher: 'Example',
+            },
+          ],
+        },
+        plagiarismAudit: {
+          maxSimilarity: 0.01,
+          isAcceptable: true,
+          longestCommonPhraseLength: 1,
+          offendingPhrases: [],
+        },
+        readingTimeMinutes: 1,
+      };
+
+      const article1 = await manager.saveDraftArticle({
+        synthesisResult: baseResult,
+        verifiedClaims,
+      });
+
+      const article2 = await manager.saveDraftArticle({
+        synthesisResult: {
+          ...baseResult,
+          draft: { ...baseResult.draft, title: 'Second Article Same Slug' },
+        },
+        verifiedClaims,
+      });
+
+      expect(article1.slug).toBe('collision-test-slug');
+      expect(article2.slug).not.toBe(article1.slug);
+      expect(article2.slug).toContain('collision-test-slug-');
+    });
   });
 });

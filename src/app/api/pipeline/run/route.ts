@@ -3,13 +3,11 @@ import { getDb } from '../../../../db';
 import * as schema from '../../../../db/schema';
 import { eq } from 'drizzle-orm';
 import { AutonomousNewsroomOrchestrator } from '../../../../services/orchestrator';
-import { initializeDatabase } from '../../../../db/init';
-import { seedDefaultSources } from '../../../../services/ingestion/seed-sources';
+import { ensureDatabaseInitialized } from '../../../../db/init';
 
 export async function POST() {
   try {
-    await initializeDatabase();
-    await seedDefaultSources();
+    await ensureDatabaseInitialized();
     const db = await getDb();
 
     const activeSources = await db
