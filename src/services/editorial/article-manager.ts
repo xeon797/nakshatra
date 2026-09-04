@@ -13,6 +13,7 @@ export class ArticleManager {
     storyId?: string;
     verifiedClaims: VerifiedClaimInput[];
     editorUserId?: string;
+    bilingualDraft?: any;
   }): Promise<typeof schema.articles.$inferSelect> {
     const db = await getDb();
     const { draft, plagiarismAudit, readingTimeMinutes } = params.synthesisResult;
@@ -57,16 +58,35 @@ export class ArticleManager {
       if (collisionAttempts >= 5) break;
     }
 
+    // Bilingual fields resolution
+    const bDraft = params.bilingualDraft;
+    const titleEn = bDraft?.en?.title || draft.title;
+    const titleBn = bDraft?.bn?.title || draft.title;
+    const summaryEn = bDraft?.en?.summary || draft.deck;
+    const summaryBn = bDraft?.bn?.summary || draft.deck;
+    const contentEn = bDraft?.en?.content || draft.contentMarkdown;
+    const contentBn = bDraft?.bn?.content || draft.contentMarkdown;
+    const keyTakeawaysEn = bDraft?.en?.keyTakeaways || [];
+    const keyTakeawaysBn = bDraft?.bn?.keyTakeaways || [];
+
     // 1. Insert Article
     const [insertedArticle] = await db
       .insert(schema.articles)
       .values({
         storyClusterId: params.storyClusterId,
         storyId: params.storyId,
-        title: draft.title,
+        title: titleEn,
         slug: uniqueSlug,
-        deck: draft.deck,
-        contentMarkdown: draft.contentMarkdown,
+        deck: summaryEn,
+        contentMarkdown: contentEn,
+        titleEn,
+        titleBn,
+        summaryEn,
+        summaryBn,
+        contentEn,
+        contentBn,
+        keyTakeawaysEn,
+        keyTakeawaysBn,
         metaDescription: draft.metaDescription,
         status: 'review_pending',
         confidenceScore: avgConfidence,

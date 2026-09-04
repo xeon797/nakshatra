@@ -79,6 +79,37 @@ export class MockAiProvider implements AiModelProvider {
         reasoning: 'Confirmed against primary source text.',
         citationUrls: ['https://example.com/primary'],
       },
+      // BilingualArticleDraftSchema
+      {
+        slug: `frontier-ai-breakthrough-${Date.now().toString(36)}`,
+        en: {
+          title: 'Frontier AI Reasoning Breakthrough',
+          summary: 'A comprehensive multi-perspective briefing on state of the art AI systems.',
+          content: 'Researchers have introduced breakthrough capabilities in frontier models [^1]. The development marks significant advancement in reasoning architectures.',
+          keyTakeaways: [
+            'Frontier AI models demonstrate breakthrough reasoning capabilities.',
+            'Multi-source validation confirms verified benchmarks across lab releases.',
+          ],
+        },
+        bn: {
+          title: 'ফ্রন্টিয়ার এআই রিজনিং মডেলে যুগান্তকারী অগ্রগতি',
+          summary: 'অত্যাধুনিক কৃত্রিম বুদ্ধিমত্তা ব্যবস্থার উপর একটি সমন্বিত বিশ্লেষণ প্রতিবেদন।',
+          content: 'গবেষক দল ফ্রন্টিয়ার রিজনিং মডেলে (Reasoning Model) উল্লেখযোগ্য সক্ষমতা প্রদর্শন করেছেন [^1]। এই বিকাশ এআই স্থাপত্যে একটি নতুন দিগন্ত উন্মোচন করেছে।',
+          keyTakeaways: [
+            'ফ্রন্টিয়ার এআই রিজনিং মডেলে অভূতপূর্ব সক্ষমতা অর্জিত হয়েছে।',
+            'একাধিক প্রাথমিক উৎসের তথ্যের ভিত্তিতে বেঞ্চমার্ক নিশ্চিত করা হয়েছে।',
+          ],
+        },
+        citations: [
+          {
+            citationIndex: 1,
+            claimIndex: 0,
+            anchorText: 'breakthrough capabilities',
+            primarySourceUrl: 'https://example.com/primary-source',
+            sourcePublisher: 'Research Lab',
+          },
+        ],
+      },
     ];
   }
 
@@ -103,6 +134,41 @@ export class MockAiProvider implements AiModelProvider {
 
       if (!rawData) {
         throw new Error('MockAiProvider has no mock responses in queue or default response set.');
+      }
+    }
+
+    // Bidirectional adapter: seamlessly support both single-language and bilingual draft mocks
+    if (rawData && rawData.title && rawData.contentMarkdown && !rawData.en) {
+      const testBilingual = schema.safeParse({
+        slug: rawData.slug || 'slug',
+        en: {
+          title: rawData.title,
+          summary: rawData.deck || rawData.title,
+          content: rawData.contentMarkdown,
+          keyTakeaways: [rawData.deck || rawData.title],
+        },
+        bn: {
+          title: rawData.title,
+          summary: rawData.deck || rawData.title,
+          content: rawData.contentMarkdown,
+          keyTakeaways: [rawData.deck || rawData.title],
+        },
+        citations: rawData.citations || [],
+      });
+      if (testBilingual.success) {
+        rawData = testBilingual.data;
+      }
+    } else if (rawData && rawData.en && !rawData.title) {
+      const testSingle = schema.safeParse({
+        title: rawData.en.title,
+        deck: rawData.en.summary,
+        slug: rawData.slug,
+        contentMarkdown: rawData.en.content,
+        metaDescription: rawData.en.summary,
+        citations: rawData.citations || [],
+      });
+      if (testSingle.success) {
+        rawData = testSingle.data;
       }
     }
 

@@ -85,6 +85,14 @@ CREATE TABLE IF NOT EXISTS articles (
     slug VARCHAR(255) NOT NULL UNIQUE,
     deck TEXT NOT NULL,
     content_markdown TEXT NOT NULL,
+    title_en VARCHAR(255) NOT NULL DEFAULT '',
+    title_bn VARCHAR(255) NOT NULL DEFAULT '',
+    summary_en TEXT NOT NULL DEFAULT '',
+    summary_bn TEXT NOT NULL DEFAULT '',
+    content_en TEXT NOT NULL DEFAULT '',
+    content_bn TEXT NOT NULL DEFAULT '',
+    key_takeaways_en TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+    key_takeaways_bn TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
     meta_description VARCHAR(320) NOT NULL,
     status VARCHAR(50) NOT NULL DEFAULT 'draft',
     confidence_score NUMERIC(3, 2) NOT NULL DEFAULT 0.00,
@@ -147,6 +155,7 @@ CREATE TABLE IF NOT EXISTS subscribers (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     email VARCHAR(255) NOT NULL UNIQUE,
     topics TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+    preferred_language VARCHAR(10) NOT NULL DEFAULT 'bn',
     is_active BOOLEAN NOT NULL DEFAULT true,
     is_verified BOOLEAN NOT NULL DEFAULT false,
     verification_token VARCHAR(255),
@@ -196,7 +205,16 @@ CREATE INDEX IF NOT EXISTS idx_stories_category ON stories(category);
 CREATE INDEX IF NOT EXISTS idx_stories_first_seen_at ON stories(first_seen_at);
 
 ALTER TABLE articles ADD COLUMN IF NOT EXISTS story_id UUID REFERENCES stories(id) ON DELETE SET NULL;
+ALTER TABLE articles ADD COLUMN IF NOT EXISTS title_en VARCHAR(255) NOT NULL DEFAULT '';
+ALTER TABLE articles ADD COLUMN IF NOT EXISTS title_bn VARCHAR(255) NOT NULL DEFAULT '';
+ALTER TABLE articles ADD COLUMN IF NOT EXISTS summary_en TEXT NOT NULL DEFAULT '';
+ALTER TABLE articles ADD COLUMN IF NOT EXISTS summary_bn TEXT NOT NULL DEFAULT '';
+ALTER TABLE articles ADD COLUMN IF NOT EXISTS content_en TEXT NOT NULL DEFAULT '';
+ALTER TABLE articles ADD COLUMN IF NOT EXISTS content_bn TEXT NOT NULL DEFAULT '';
+ALTER TABLE articles ADD COLUMN IF NOT EXISTS key_takeaways_en TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];
+ALTER TABLE articles ADD COLUMN IF NOT EXISTS key_takeaways_bn TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];
 ALTER TABLE subscribers ADD COLUMN IF NOT EXISTS topics TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];
+ALTER TABLE subscribers ADD COLUMN IF NOT EXISTS preferred_language VARCHAR(10) NOT NULL DEFAULT 'bn';
 ALTER TABLE subscribers ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT true;
 `;
 

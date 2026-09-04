@@ -84,31 +84,59 @@ export class MultiSourceWriterAgent {
       ...evidencePacket.secondarySources.map((s) => s.text),
     ];
 
-    // 4. Run editorial synthesis agent
-    const synthesisResult = await this.synthesisAgent.synthesizeArticle({
-      topicTitle,
-      verifiedClaims,
-      rawSourceTexts,
-    });
+    // 4. Run editorial synthesis agent (Dual-Language EN & BN)
+    try {
+      const bilingualResult = await this.synthesisAgent.synthesizeBilingualArticle({
+        topicTitle,
+        verifiedClaims,
+        rawSourceTexts,
+      });
 
-    // 5. Persist draft article in PostgreSQL
-    const savedDraft = await this.articleManager.saveDraftArticle({
-      synthesisResult,
-      storyId: story?.id,
-      verifiedClaims,
-    });
+      // 5. Persist draft article in PostgreSQL with dual-language fields
+      const savedDraft = await this.articleManager.saveDraftArticle({
+        synthesisResult: bilingualResult,
+        bilingualDraft: bilingualResult.bilingualDraft,
+        storyId: story?.id,
+        verifiedClaims,
+      });
 
-    // 6. Update story status to published
-    if (story) {
-      await db
-        .update(schema.stories)
-        .set({
-          editorialStatus: 'published',
-          lastUpdatedAt: new Date(),
-        })
-        .where(eq(schema.stories.id, story.id));
+      // 6. Update story status to published
+      if (story) {
+        await db
+          .update(schema.stories)
+          .set({
+            editorialStatus: 'published',
+            lastUpdatedAt: new Date(),
+          })
+          .where(eq(schema.stories.id, story.id));
+      }
+
+      return savedDraft;
+    } catch {
+      // Graceful fallback to single-language synthesis
+      const synthesisResult = await this.synthesisAgent.synthesizeArticle({
+        topicTitle,
+        verifiedClaims,
+        rawSourceTexts,
+      });
+
+      const savedDraft = await this.articleManager.saveDraftArticle({
+        synthesisResult,
+        storyId: story?.id,
+        verifiedClaims,
+      });
+
+      if (story) {
+        await db
+          .update(schema.stories)
+          .set({
+            editorialStatus: 'published',
+            lastUpdatedAt: new Date(),
+          })
+          .where(eq(schema.stories.id, story.id));
+      }
+
+      return savedDraft;
     }
-
-    return savedDraft;
   }
 }

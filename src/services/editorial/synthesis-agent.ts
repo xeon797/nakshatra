@@ -20,6 +20,48 @@ export const SynthesizedArticleDraftSchema = z.object({
   citations: z.array(ArticleCitationSchema).describe('Complete list of mapped citations.'),
 });
 
+export const BilingualLanguageContentSchema = z.object({
+  title: z.string().max(255).describe('Journalistic headline, active voice, non-sensational.'),
+  summary: z.string().describe('Executive summary deck explaining the core development.'),
+  content: z.string().describe('Body of the article in markdown with inline footnote tags [^1], [^2].'),
+  keyTakeaways: z.array(z.string()).default([]).describe('List of 2-4 bullet key takeaways.'),
+});
+
+export const BilingualArticleDraftSchema = z.object({
+  slug: z.string().describe('URL-friendly kebab-case ASCII Latin slug.'),
+  en: BilingualLanguageContentSchema,
+  bn: BilingualLanguageContentSchema,
+  citations: z.array(ArticleCitationSchema).default([]),
+});
+
+export type BilingualArticleDraft = z.infer<typeof BilingualArticleDraftSchema>;
+
+export function ensureLatinSlug(rawSlug: string, fallbackTitle: string): string {
+  const cleaned = (rawSlug || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, ' ')
+    .trim()
+    .replace(/[\s-]+/g, '-');
+  if (cleaned.length >= 3) return cleaned;
+
+  const fallbackCleaned = (fallbackTitle || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, ' ')
+    .trim()
+    .replace(/[\s-]+/g, '-');
+  if (fallbackCleaned.length >= 3) return fallbackCleaned;
+
+  return `intel-briefing-${Date.now().toString(36)}`;
+}
+
+export interface BilingualSynthesisResult {
+  draft: SynthesizedArticleDraft;
+  bilingualDraft: BilingualArticleDraft;
+  plagiarismAudit: PlagiarismCheckResult;
+  runId?: string;
+  readingTimeMinutes: number;
+}
+
 export type SynthesizedArticleDraft = z.infer<typeof SynthesizedArticleDraftSchema>;
 
 export interface VerifiedClaimInput {
@@ -168,6 +210,156 @@ Generate the full synthesized article draft in JSON conforming to the schema.`;
 
       return {
         draft,
+        plagiarismAudit,
+        runId,
+        readingTimeMinutes,
+      };
+    } catch (err: any) {
+      if (runId) {
+        await this.logger.finishRun(runId, {
+          status: 'failed',
+          promptTokens: 0,
+          completionTokens: 0,
+          latencyMs: Date.now() - startTime,
+          errorMessage: err.message || String(err),
+        });
+      }
+      throw err;
+    }
+  }
+
+  async synthesizeBilingualArticle(params: {
+    topicTitle: string;
+    verifiedClaims: VerifiedClaimInput[];
+    rawSourceTexts: string[];
+    storyClusterId?: string;
+  }): Promise<BilingualSynthesisResult> {
+    if (params.verifiedClaims.length === 0) {
+      throw new Error('Cannot synthesize article: No verified claims provided.');
+    }
+
+    const startTime = Date.now();
+    let runId: string | undefined;
+
+    try {
+      runId = await this.logger.startRun({
+        agentName: 'EditorialSynthesisAgent',
+        agentVersion: '2.0.0-bilingual',
+        modelProvider: this.aiProvider.providerName,
+        modelName: this.aiProvider.defaultModel,
+        storyClusterId: params.storyClusterId,
+      });
+    } catch {
+      // Graceful logger fallback
+    }
+
+    const claimsContext = params.verifiedClaims
+      .map(
+        (c, idx) =>
+          `[Claim ${idx}] (${c.claimType})\nClaim: ${c.claimText}\nConfidence: ${c.confidenceScore}\nSource: ${c.sourcePublisher} (${c.primarySourceUrl})\nVerified Excerpt: "${c.verbatimExcerpt}"`
+      )
+      .join('\n\n');
+
+    const systemPrompt = `You are NAKSHATRA's Lead Bilingual Editorial Journalist and AI Researcher.
+Your mandate is to craft an authoritative dual-language news briefing in both English (en) and Bengali (bn) based ONLY on the provided VERIFIED CLAIMS.
+
+INVIOLABLE RULES:
+1. Grounding: You may ONLY state facts directly derived from the verified claims. Zero speculation.
+2. Inline Footnotes: For every factual statement in BOTH languages, append inline citation tokens like [^1], [^2] referencing the citation list.
+3. Originality: Write in clear, active journalistic prose. DO NOT copy more than 4 consecutive words verbatim from source text.
+4. Completeness: Ensure all citations mapped in the citations array match the [^N] numbers in both body texts.
+5. Slug Standard: The "slug" field MUST be strictly ASCII Latin kebab-case [a-z0-9-] suitable for clean URL sharing.
+6. Bengali Editorial Standard:
+   - Modern, natural tech Bengali (avoid awkward, archaic or overly literal translations).
+   - Retain standard AI concepts transliterated or parenthesized in English (e.g. "রিজনিং মডেল (Reasoning Model)", "ফাইন-টিউনিং", "কনটেক্সট উইন্ডো", "মাল্টি-মোডাল").`;
+
+    const userPrompt = `Story Topic: ${params.topicTitle}
+
+VERIFIED CLAIMS LIST:
+${claimsContext}
+
+Generate the full synthesized bilingual article draft in JSON conforming to the schema (with fields: slug, en, bn, citations).`;
+
+    try {
+      const response = await this.aiProvider.generateStructured(
+        userPrompt,
+        BilingualArticleDraftSchema,
+        {
+          systemPrompt,
+          temperature: 0.2,
+        }
+      );
+
+      const cleanSlug = ensureLatinSlug(response.data.slug, response.data.en.title);
+      const bilingualDraft: BilingualArticleDraft = {
+        slug: cleanSlug,
+        en: {
+          title: response.data.en.title,
+          summary: response.data.en.summary,
+          content: response.data.en.content,
+          keyTakeaways: response.data.en.keyTakeaways || [],
+        },
+        bn: {
+          title: response.data.bn.title,
+          summary: response.data.bn.summary,
+          content: response.data.bn.content,
+          keyTakeaways: response.data.bn.keyTakeaways || [],
+        },
+        citations: response.data.citations || [],
+      };
+
+      // Deterministic N-Gram Anti-Plagiarism Gate Check on English content
+      const plagiarismAudit = this.plagiarismDetector.check(
+        bilingualDraft.en.content,
+        params.rawSourceTexts
+      );
+
+      if (!plagiarismAudit.isAcceptable) {
+        throw new PlagiarismGateError(plagiarismAudit);
+      }
+
+      // Legacy compatibility draft
+      const draft: SynthesizedArticleDraft = {
+        title: bilingualDraft.en.title,
+        deck: bilingualDraft.en.summary,
+        slug: cleanSlug,
+        contentMarkdown: bilingualDraft.en.content,
+        metaDescription: bilingualDraft.en.summary.slice(0, 160),
+        citations: bilingualDraft.citations,
+      };
+
+      const wordCount = bilingualDraft.en.content.split(/\s+/).length;
+      const readingTimeMinutes = Math.max(1, Math.ceil(wordCount / 200));
+
+      if (runId) {
+        await this.logger.logStep({
+          agentRunId: runId,
+          stepNumber: 1,
+          actionName: 'synthesize_bilingual_article',
+          inputPayload: {
+            topic: params.topicTitle,
+            claimsCount: params.verifiedClaims.length,
+          },
+          outputPayload: {
+            titleEn: bilingualDraft.en.title,
+            titleBn: bilingualDraft.bn.title,
+            citationsCount: draft.citations.length,
+            similarityScore: plagiarismAudit.maxSimilarity,
+          },
+          rationale: `Synthesized bilingual draft with ${draft.citations.length} citations.`,
+        });
+
+        await this.logger.finishRun(runId, {
+          status: 'success',
+          promptTokens: response.promptTokens,
+          completionTokens: response.completionTokens,
+          latencyMs: Date.now() - startTime,
+        });
+      }
+
+      return {
+        draft,
+        bilingualDraft,
         plagiarismAudit,
         runId,
         readingTimeMinutes,

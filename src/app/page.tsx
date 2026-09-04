@@ -11,6 +11,8 @@ import { HeroStory } from '../components/home/HeroStory';
 import { NewsGridWithFilter, ArticleCardItem } from '../components/home/NewsGridWithFilter';
 import { NewsletterCapture } from '../components/home/NewsletterCapture';
 
+import { HomeFeedHeader, FeedSectionHeading } from '../components/home/HomeFeedHeader';
+
 export const dynamic = 'force-dynamic';
 
 export default async function HomePage() {
@@ -40,12 +42,16 @@ export default async function HomePage() {
 
   const articlesPublishedCount = rawPublishedArticles.length;
 
-  // Format articles for client card display
+  // Format articles for client card display with bilingual properties
   const formattedArticles: ArticleCardItem[] = rawPublishedArticles.map((a) => ({
     id: a.id,
     title: a.title,
+    titleEn: a.titleEn || a.title,
+    titleBn: a.titleBn || a.title,
     slug: a.slug,
     deck: a.deck,
+    summaryEn: a.summaryEn || a.deck,
+    summaryBn: a.summaryBn || a.deck,
     category: a.story?.category || 'llm_release',
     riskLevel: a.story?.riskLevel || 'low',
     confidenceScore: a.confidenceScore,
@@ -80,49 +86,10 @@ export default async function HomePage() {
       ? formattedArticles.filter((a) => a.id !== heroStory.id)
       : formattedArticles;
 
-  const todayFormatted = new Date().toLocaleDateString('en-US', {
-    weekday: 'long',
-    month: 'long',
-    day: 'numeric',
-    year: 'numeric',
-  });
-
   return (
     <div className="space-y-10 pb-16">
       {/* 1. Top Section: Site Branding, Dynamic Date, and Quick Actions */}
-      <section className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800/80 pb-6 pt-2">
-        <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <span className="w-2.5 h-2.5 rounded-full bg-sky-400 animate-pulse" />
-            <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-white font-mono">
-              NAKSHATRA
-            </h1>
-            <span className="text-xs px-2 py-0.5 rounded bg-sky-500/10 text-sky-400 border border-sky-500/20 font-semibold tracking-wider uppercase">
-              Intelligence Briefing
-            </span>
-          </div>
-          <p className="text-xs font-mono text-slate-400">
-            {todayFormatted} &bull; Autonomous Evidence-Grounded Journalism
-          </p>
-        </div>
-
-        <div className="flex items-center gap-3">
-          <a
-            href="#newsletter-subscribe"
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-sky-500/10 hover:bg-sky-500/20 text-sky-400 border border-sky-500/30 font-semibold text-xs transition-colors shadow-sm"
-          >
-            <Mail className="w-3.5 h-3.5" />
-            <span>Get Daily Digest</span>
-          </a>
-          <Link
-            href="/admin/newsroom"
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 text-xs font-medium transition-colors"
-          >
-            <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-            <span>Newsroom Desk</span>
-          </Link>
-        </div>
-      </section>
+      <HomeFeedHeader />
 
       {/* Live Pulse Ticker */}
       <PulseTicker
@@ -154,15 +121,7 @@ export default async function HomePage() {
 
       {/* 3. News Grid & Filtering (Topic Tabs + Search) */}
       <section className="space-y-6">
-        <div className="border-b border-slate-800 pb-3">
-          <h2 className="text-xl font-extrabold text-white tracking-tight flex items-center gap-2">
-            <span>Verified Intelligence Feed</span>
-            <span className="text-xs font-normal text-slate-400">
-              (Filtered by primary lab releases & verified research)
-            </span>
-          </h2>
-        </div>
-
+        <FeedSectionHeading />
         <NewsGridWithFilter articles={gridArticles} />
       </section>
 

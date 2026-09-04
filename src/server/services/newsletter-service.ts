@@ -4,10 +4,12 @@ import * as schema from '../../db/schema';
 import { eq, desc, gte, and } from 'drizzle-orm';
 import { Resend } from 'resend';
 import { renderDailyDigestHtml, EmailStoryItem, DailyDigestEmailProps } from '../../emails/daily-digest';
+import { renderDailyDigestBnHtml } from '../../emails/daily-digest-bn';
 
 export const SubscribeSchema = z.object({
   email: z.string().email('Please enter a valid email address').max(255),
   topics: z.array(z.string()).default(['all']),
+  preferredLanguage: z.enum(['en', 'bn']).default('bn'),
 });
 
 export type SubscribeInput = z.infer<typeof SubscribeSchema>;
@@ -46,7 +48,7 @@ export class NewsletterService {
   }
 
   /**
-   * Subscribes an email to the newsletter with specific topic preferences
+   * Subscribes an email to the newsletter with specific topic preferences and language
    */
   async subscribe(input: SubscribeInput): Promise<{
     success: boolean;
@@ -56,6 +58,7 @@ export class NewsletterService {
     const validated = SubscribeSchema.parse(input);
     const normalizedEmail = validated.email.trim().toLowerCase();
     const topics = validated.topics.length > 0 ? validated.topics : ['all'];
+    const preferredLanguage = validated.preferredLanguage || 'bn';
 
     const db = await getDb();
 
@@ -71,6 +74,7 @@ export class NewsletterService {
         .update(schema.subscribers)
         .set({
           topics,
+          preferredLanguage,
           isActive: true,
           unsubscribedAt: null,
         })
@@ -90,6 +94,7 @@ export class NewsletterService {
       .values({
         email: normalizedEmail,
         topics,
+        preferredLanguage,
         isActive: true,
         isVerified: true,
       })
@@ -170,8 +175,12 @@ export class NewsletterService {
       storyItems.push({
         id: article.id,
         title: article.title,
+        titleEn: article.titleEn || article.title,
+        titleBn: article.titleBn || article.title,
         slug: article.slug,
         deck: article.deck,
+        summaryEn: article.summaryEn || article.deck,
+        summaryBn: article.summaryBn || article.deck,
         category,
         sourceNames,
         readingTimeMinutes: article.readingTimeMinutes,
@@ -227,7 +236,7 @@ export class NewsletterService {
   }
 
   /**
-   * Sends the daily digest to active subscribers matching topics
+   * Sends the daily digest to active subscribers matching topics, routed by preferred language
    */
   async sendDailyDigest(options?: {
     lookbackHours?: number;
@@ -261,8 +270,10 @@ export class NewsletterService {
       return result;
     }
 
-    const htmlContent = renderDailyDigestHtml(digestPayload);
-    const subject = `NAKSHATRA Daily: ${digestPayload.topStory?.title || 'Frontier AI Intelligence Briefing'}`;
+    const enHtmlContent = renderDailyDigestHtml(digestPayload);
+    const bnHtmlContent = renderDailyDigestBnHtml(digestPayload);
+    const enSubject = `NAKSHATRA Daily: ${digestPayload.topStory?.titleEn || digestPayload.topStory?.title || 'Frontier AI Intelligence Briefing'}`;
+    const bnSubject = `নক্ষত্র দৈনিক এআই ব্রিফিং: ${digestPayload.topStory?.titleBn || digestPayload.topStory?.title || 'ফ্রন্টিয়ার এআই ইন্টেলিজেন্স'}`;
 
     for (const sub of activeSubscribers) {
       // Check if subscriber wants this content
@@ -279,6 +290,10 @@ export class NewsletterService {
       }
 
       result.subscribersMatched++;
+
+      const isBn = sub.preferredLanguage === 'bn';
+      const htmlContent = isBn ? bnHtmlContent : enHtmlContent;
+      const subject = isBn ? bnSubject : enSubject;
 
       if (this.isMock || !this.resendClient) {
         // Safe mock delivery

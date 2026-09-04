@@ -3,8 +3,12 @@ import React from 'react';
 export interface EmailStoryItem {
   id: string;
   title: string;
+  titleEn?: string;
+  titleBn?: string;
   slug: string;
   deck: string;
+  summaryEn?: string;
+  summaryBn?: string;
   category: string;
   sourceNames: string[];
   readingTimeMinutes?: number;

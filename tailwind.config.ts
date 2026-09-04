@@ -21,6 +21,11 @@ const config: Config = {
           900: '#064e3b',
         },
       },
+      fontFamily: {
+        display: ['var(--font-satoshi)', 'sans-serif'],
+        sans: ['var(--font-body)', 'sans-serif'],
+        bengali: ['var(--font-bengali)', 'sans-serif'],
+      },
     },
   },
   plugins: [],

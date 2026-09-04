@@ -1,3 +1,5 @@
+@import url('https://api.fontshare.com/v2/css?f[]=satoshi@500,700,800,900&f[]=general-sans@400,500,600&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -9,13 +11,42 @@
   --border-color: #1e293b;
   --accent: #38bdf8;
   --accent-glow: rgba(56, 189, 248, 0.15);
+  --font-satoshi: 'Satoshi', 'General Sans', sans-serif;
+  --font-body: 'General Sans', sans-serif;
 }
 
 body {
   background-color: var(--background);
   color: var(--foreground);
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  font-family: var(--font-body), sans-serif;
   -webkit-font-smoothing: antialiased;
+}
+
+/* Bengali Typography: relaxed leading to prevent conjunct / vowel clipping */
+html[lang="bn"],
+.lang-bn,
+.font-bengali {
+  font-family: var(--font-bengali), 'Hind Siliguri', sans-serif;
+  line-height: 1.75;
+}
+
+.lang-bn h1,
+.lang-bn h2,
+.lang-bn h3,
+.lang-bn h4 {
+  font-family: var(--font-bengali), sans-serif;
+  line-height: 1.4;
+  letter-spacing: normal;
+}
+
+/* English Typography: Satoshi for Display, General Sans for Body */
+html[lang="en"] h1,
+html[lang="en"] h2,
+html[lang="en"] h3,
+html[lang="en"] h4,
+.font-display {
+  font-family: var(--font-satoshi), sans-serif;
+  letter-spacing: -0.02em;
 }
 
 .gradient-title {
