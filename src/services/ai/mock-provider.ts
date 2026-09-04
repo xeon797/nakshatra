@@ -4,12 +4,17 @@ import { AiModelProvider, AiCallOptions, AiResponse, AiStructuredResponse } from
 export class MockAiProvider implements AiModelProvider {
   readonly providerName = 'mock_ai';
   readonly defaultModel = 'mock-gemini-2.5';
+  private mockStructuredQueue: any[] = [];
   private mockStructuredResponse: any = null;
   private mockTextResponse: string = 'Mock response';
 
   constructor(options?: { mockStructured?: any; mockText?: string }) {
     if (options?.mockStructured) this.mockStructuredResponse = options.mockStructured;
     if (options?.mockText) this.mockTextResponse = options.mockText;
+  }
+
+  enqueueStructuredResponse(data: any) {
+    this.mockStructuredQueue.push(data);
   }
 
   setMockStructuredResponse(data: any) {
@@ -35,11 +40,16 @@ export class MockAiProvider implements AiModelProvider {
     schema: z.ZodType<T>,
     options?: AiCallOptions
   ): Promise<AiStructuredResponse<T>> {
-    if (!this.mockStructuredResponse) {
-      throw new Error('MockAiProvider has no mockStructuredResponse set.');
+    let rawData: any;
+    if (this.mockStructuredQueue.length > 0) {
+      rawData = this.mockStructuredQueue.shift();
+    } else if (this.mockStructuredResponse) {
+      rawData = this.mockStructuredResponse;
+    } else {
+      throw new Error('MockAiProvider has no mock responses in queue or default response set.');
     }
 
-    const validated = schema.parse(this.mockStructuredResponse);
+    const validated = schema.parse(rawData);
     return {
       data: validated,
       promptTokens: Math.ceil(prompt.length / 4),
