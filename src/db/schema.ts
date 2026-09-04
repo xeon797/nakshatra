@@ -137,6 +137,7 @@ export const articles = pgTable(
   {
     id: uuid('id').defaultRandom().primaryKey(),
     storyClusterId: uuid('story_cluster_id').references(() => storyClusters.id, { onDelete: 'set null' }),
+    storyId: uuid('story_id').references(() => stories.id, { onDelete: 'set null' }),
     title: varchar('title', { length: 255 }).notNull(),
     slug: varchar('slug', { length: 255 }).notNull().unique(),
     deck: text('deck').notNull(),
@@ -210,7 +211,9 @@ export const agentStepLogs = pgTable('agent_step_logs', {
 // 10. Subscribers & Topics
 export const subscribers = pgTable('subscribers', {
   id: uuid('id').defaultRandom().primaryKey(),
-  email: varchar('email', { length: 320 }).notNull().unique(),
+  email: varchar('email', { length: 255 }).notNull().unique(),
+  topics: text('topics').array().notNull().default([]),
+  isActive: boolean('is_active').notNull().default(true),
   isVerified: boolean('is_verified').notNull().default(false),
   verificationToken: varchar('verification_token', { length: 255 }),
   unsubscribedAt: timestamp('unsubscribed_at', { withTimezone: true }),
@@ -313,6 +316,7 @@ export const storiesRelations = relations(stories, ({ one, many }) => ({
     references: [sources.id],
   }),
   sources: many(storySources),
+  articles: many(articles),
 }));
 
 export const storySourcesRelations = relations(storySources, ({ one }) => ({
@@ -339,6 +343,10 @@ export const articlesRelations = relations(articles, ({ one, many }) => ({
   cluster: one(storyClusters, {
     fields: [articles.storyClusterId],
     references: [storyClusters.id],
+  }),
+  story: one(stories, {
+    fields: [articles.storyId],
+    references: [stories.id],
   }),
   citations: many(articleCitations),
   revisions: many(articleRevisions),

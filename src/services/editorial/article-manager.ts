@@ -10,6 +10,7 @@ export class ArticleManager {
   async saveDraftArticle(params: {
     synthesisResult: SynthesisResult;
     storyClusterId?: string;
+    storyId?: string;
     verifiedClaims: VerifiedClaimInput[];
     editorUserId?: string;
   }): Promise<typeof schema.articles.$inferSelect> {
@@ -61,6 +62,7 @@ export class ArticleManager {
       .insert(schema.articles)
       .values({
         storyClusterId: params.storyClusterId,
+        storyId: params.storyId,
         title: draft.title,
         slug: uniqueSlug,
         deck: draft.deck,
@@ -155,7 +157,67 @@ export class ArticleManager {
   }
 
   /**
-   * Retrieves article with citations by slug
+   * Retrieves published articles enriched with story metadata and source pills
+   */
+  async getPublishedArticlesWithMetadata(limit = 30, offset = 0) {
+    const db = await getDb();
+    const rows = await db
+      .select({
+        article: schema.articles,
+        story: schema.stories,
+      })
+      .from(schema.articles)
+      .leftJoin(schema.stories, eq(schema.articles.storyId, schema.stories.id))
+      .where(eq(schema.articles.status, 'published'))
+      .orderBy(desc(schema.articles.publishedAt))
+      .limit(limit)
+      .offset(offset);
+
+    const enriched = await Promise.all(
+      rows.map(async ({ article, story }) => {
+        let sourcesList: Array<{ name: string; tier?: string; isPrimary?: boolean }> = [];
+        if (story) {
+          const storySourcesList = await db
+            .select({
+              name: schema.sources.name,
+              tier: schema.sources.tier,
+              isPrimary: schema.storySources.isPrimary,
+            })
+            .from(schema.storySources)
+            .innerJoin(schema.rawArticles, eq(schema.storySources.rawArticleId, schema.rawArticles.id))
+            .innerJoin(schema.sources, eq(schema.rawArticles.sourceId, schema.sources.id))
+            .where(eq(schema.storySources.storyId, story.id));
+
+          sourcesList = storySourcesList;
+        }
+
+        if (sourcesList.length === 0) {
+          const citations = await db
+            .select({
+              name: schema.articleCitations.sourcePublisher,
+            })
+            .from(schema.articleCitations)
+            .where(eq(schema.articleCitations.articleId, article.id));
+          sourcesList = Array.from(new Set(citations.map((c) => c.name))).map((n) => ({
+            name: n,
+            tier: 'tier_1_primary',
+            isPrimary: true,
+          }));
+        }
+
+        return {
+          ...article,
+          story: story || null,
+          sources: sourcesList,
+        };
+      })
+    );
+
+    return enriched;
+  }
+
+  /**
+   * Retrieves article with citations and story metadata by slug
    */
   async getArticleBySlug(slug: string) {
     const db = await getDb();
@@ -173,7 +235,42 @@ export class ArticleManager {
       .where(eq(schema.articleCitations.articleId, article.id))
       .orderBy(schema.articleCitations.citationIndex);
 
-    return { ...article, citations };
+    let story = null;
+    let storySourcesList: Array<{
+      name: string;
+      baseUrl: string;
+      tier: string;
+      isPrimary: boolean;
+      title: string;
+      url: string;
+    }> = [];
+
+    if (article.storyId) {
+      const [storyRow] = await db
+        .select()
+        .from(schema.stories)
+        .where(eq(schema.stories.id, article.storyId))
+        .limit(1);
+      story = storyRow || null;
+
+      if (story) {
+        storySourcesList = await db
+          .select({
+            name: schema.sources.name,
+            baseUrl: schema.sources.baseUrl,
+            tier: schema.sources.tier,
+            isPrimary: schema.storySources.isPrimary,
+            title: schema.rawArticles.title,
+            url: schema.rawArticles.canonicalUrl,
+          })
+          .from(schema.storySources)
+          .innerJoin(schema.rawArticles, eq(schema.storySources.rawArticleId, schema.rawArticles.id))
+          .innerJoin(schema.sources, eq(schema.rawArticles.sourceId, schema.sources.id))
+          .where(eq(schema.storySources.storyId, story.id));
+      }
+    }
+
+    return { ...article, citations, story, storySources: storySourcesList };
   }
 
   /**

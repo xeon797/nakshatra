@@ -94,6 +94,7 @@ export class MultiSourceWriterAgent {
     // 5. Persist draft article in PostgreSQL
     const savedDraft = await this.articleManager.saveDraftArticle({
       synthesisResult,
+      storyId: story?.id,
       verifiedClaims,
     });
 

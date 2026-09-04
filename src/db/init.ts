@@ -145,7 +145,9 @@ CREATE TABLE IF NOT EXISTS agent_step_logs (
 
 CREATE TABLE IF NOT EXISTS subscribers (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    email VARCHAR(320) NOT NULL UNIQUE,
+    email VARCHAR(255) NOT NULL UNIQUE,
+    topics TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+    is_active BOOLEAN NOT NULL DEFAULT true,
     is_verified BOOLEAN NOT NULL DEFAULT false,
     verification_token VARCHAR(255),
     unsubscribed_at TIMESTAMPTZ,
@@ -192,6 +194,10 @@ CREATE INDEX IF NOT EXISTS idx_story_sources_raw_article_id ON story_sources(raw
 CREATE INDEX IF NOT EXISTS idx_stories_editorial_status ON stories(editorial_status);
 CREATE INDEX IF NOT EXISTS idx_stories_category ON stories(category);
 CREATE INDEX IF NOT EXISTS idx_stories_first_seen_at ON stories(first_seen_at);
+
+ALTER TABLE articles ADD COLUMN IF NOT EXISTS story_id UUID REFERENCES stories(id) ON DELETE SET NULL;
+ALTER TABLE subscribers ADD COLUMN IF NOT EXISTS topics TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];
+ALTER TABLE subscribers ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT true;
 `;
 
 export const ENUM_DDL = [
