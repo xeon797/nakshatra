@@ -54,7 +54,8 @@ export class RssFeedAdapter {
 
       const canonicalUrl = canonicalizeUrl(link);
       const title = (item.title || 'Untitled Update').trim();
-      const rawHtml = item['content:encoded'] || item.content || item.summary || '';
+      const itemAny = item as Record<string, any>;
+      const rawHtml = itemAny['content:encoded'] || item.content || item.summary || '';
       const { cleanText, excerpt } = cleanHtml(rawHtml);
 
       // Fallback clean text if raw content was minimal
@@ -64,7 +65,7 @@ export class RssFeedAdapter {
 
       const authors: string[] = [];
       if (item.creator) authors.push(item.creator);
-      if (item.author) authors.push(item.author);
+      if (itemAny.author) authors.push(itemAny.author);
 
       let publishedAt = new Date();
       if (item.pubDate) {

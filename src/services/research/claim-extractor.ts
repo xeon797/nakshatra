@@ -99,7 +99,14 @@ Extract all atomic factual claims in strict JSON format.`;
         });
       }
 
-      return { claims: response.data.claims, runId };
+      const mappedClaims = response.data.claims.map((c) => ({
+        claimText: c.claimText,
+        claimType: c.claimType,
+        sourceExcerpt: c.sourceExcerpt,
+        confidenceScore: c.confidenceScore ?? 0.95,
+      }));
+
+      return { claims: mappedClaims, runId };
     } catch (err: any) {
       if (runId) {
         await this.logger.finishRun(runId, {

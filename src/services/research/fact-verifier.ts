@@ -78,7 +78,10 @@ Determine whether the source SUPPORTS, REFUTES, or is INCONCLUSIVE regarding the
       }
     );
 
-    return response.data;
+    return {
+      ...response.data,
+      confidenceScore: response.data.confidenceScore ?? 0.95,
+    };
   }
 
   async verifyClaimsGraph(params: {
