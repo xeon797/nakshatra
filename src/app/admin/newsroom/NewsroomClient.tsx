@@ -1,7 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { ShieldCheck, Check, X, Play, RefreshCw, AlertCircle, ExternalLink, CheckCircle2 } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { ShieldCheck, Check, X, Play, RefreshCw, AlertCircle, ExternalLink, CheckCircle2, LogOut } from 'lucide-react';
 
 interface CitationItem {
   id: string;
@@ -26,12 +27,23 @@ interface DraftArticleItem {
 }
 
 export default function NewsroomClient({ initialDrafts }: { initialDrafts: DraftArticleItem[] }) {
+  const router = useRouter();
   const [drafts, setDrafts] = useState<DraftArticleItem[]>(initialDrafts);
   const [selectedId, setSelectedId] = useState<string | null>(initialDrafts[0]?.id || null);
   const [isTriggering, setIsTriggering] = useState(false);
   const [actionStatus, setActionStatus] = useState<string | null>(null);
 
   const selectedDraft = drafts.find((d) => d.id === selectedId) || drafts[0];
+
+  const handleLogout = async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+      router.push('/admin/login');
+      router.refresh();
+    } catch {
+      router.push('/admin/login');
+    }
+  };
 
   const handleApprove = async (id: string) => {
     try {
@@ -41,6 +53,8 @@ export default function NewsroomClient({ initialDrafts }: { initialDrafts: Draft
         setDrafts((prev) => prev.filter((d) => d.id !== id));
         setActionStatus('Article successfully approved and published to live feed!');
         setTimeout(() => setActionStatus(null), 4000);
+      } else {
+        setActionStatus(`Error: ${data.error}`);
       }
     } catch {
       setActionStatus('Failed to approve article.');
@@ -59,6 +73,8 @@ export default function NewsroomClient({ initialDrafts }: { initialDrafts: Draft
         setDrafts((prev) => prev.filter((d) => d.id !== id));
         setActionStatus('Article rejected.');
         setTimeout(() => setActionStatus(null), 4000);
+      } else {
+        setActionStatus(`Error: ${data.error}`);
       }
     } catch {
       setActionStatus('Failed to reject article.');
@@ -73,7 +89,7 @@ export default function NewsroomClient({ initialDrafts }: { initialDrafts: Draft
       const data = await res.json();
       if (data.success) {
         setActionStatus('Pipeline execution completed! Refreshing page...');
-        setTimeout(() => window.location.reload(), 1500);
+        setTimeout(() => router.refresh(), 1000);
       } else {
         setActionStatus(`Pipeline notice: ${data.error}`);
       }
@@ -98,23 +114,33 @@ export default function NewsroomClient({ initialDrafts }: { initialDrafts: Draft
           </p>
         </div>
 
-        <button
-          onClick={handleRunPipeline}
-          disabled={isTriggering}
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-sky-500 hover:bg-sky-400 disabled:opacity-50 text-slate-950 font-bold text-xs tracking-wider uppercase transition-colors shadow-lg shadow-sky-500/20"
-        >
-          {isTriggering ? (
-            <>
-              <RefreshCw className="w-4 h-4 animate-spin" />
-              Agents Ingesting...
-            </>
-          ) : (
-            <>
-              <Play className="w-4 h-4 fill-current" />
-              Run Autonomous Ingestion
-            </>
-          )}
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={handleLogout}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition-colors"
+          >
+            <LogOut className="w-3.5 h-3.5" />
+            Sign Out
+          </button>
+
+          <button
+            onClick={handleRunPipeline}
+            disabled={isTriggering}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-sky-500 hover:bg-sky-400 disabled:opacity-50 text-slate-950 font-bold text-xs tracking-wider uppercase transition-colors shadow-lg shadow-sky-500/20"
+          >
+            {isTriggering ? (
+              <>
+                <RefreshCw className="w-4 h-4 animate-spin" />
+                Agents Ingesting...
+              </>
+            ) : (
+              <>
+                <Play className="w-4 h-4 fill-current" />
+                Run Autonomous Ingestion
+              </>
+            )}
+          </button>
+        </div>
       </div>
 
       {actionStatus && (
