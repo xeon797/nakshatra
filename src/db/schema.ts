@@ -7,7 +7,6 @@ import {
   boolean,
   numeric,
   jsonb,
-  bigint,
   uuid,
   index,
   primaryKey,
@@ -42,8 +41,8 @@ export const sources = pgTable('sources', {
   id: uuid('id').defaultRandom().primaryKey(),
   name: varchar('name', { length: 255 }).notNull(),
   baseUrl: varchar('base_url', { length: 500 }).notNull().unique(),
-  sourceType: varchar('source_type', { length: 50 }).notNull().default('rss'), // 'rss', 'arxiv', 'github_release', 'press_api', 'web_scraper'
-  tier: varchar('tier', { length: 50 }).notNull().default('tier_2_verified'), // 'tier_1_primary', 'tier_2_verified', 'tier_3_aggregator'
+  sourceType: varchar('source_type', { length: 50 }).notNull().default('rss'),
+  tier: varchar('tier', { length: 50 }).notNull().default('tier_2_verified'),
   reputationScore: numeric('reputation_score', { precision: 3, scale: 2 }).notNull().default('0.80'),
   isActive: boolean('is_active').notNull().default(true),
   pollingFrequencyMinutes: integer('polling_frequency_minutes').notNull().default(15),
@@ -67,8 +66,8 @@ export const rawArticles = pgTable(
     cleanText: text('clean_text').notNull(),
     summaryExcerpt: text('summary_excerpt'),
     publishedAt: timestamp('published_at', { withTimezone: true }),
-    contentHash: varchar('content_hash', { length: 64 }).notNull(), // SHA-256
-    simhashFingerprint: bigint('simhash_fingerprint', { mode: 'bigint' }),
+    contentHash: varchar('content_hash', { length: 64 }).notNull(),
+    simhashFingerprint: varchar('simhash_fingerprint', { length: 64 }),
     processingStatus: varchar('processing_status', { length: 50 }).notNull().default('ingested'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
@@ -84,7 +83,7 @@ export const storyClusters = pgTable('story_clusters', {
   title: varchar('title', { length: 500 }).notNull(),
   slug: varchar('slug', { length: 500 }).notNull().unique(),
   summary: text('summary').notNull(),
-  status: varchar('status', { length: 50 }).notNull().default('active'), // 'clustering', 'researching', 'ready_for_draft', 'published', 'archived'
+  status: varchar('status', { length: 50 }).notNull().default('active'),
   velocityScore: numeric('velocity_score', { precision: 5, scale: 2 }).notNull().default('1.00'),
   firstSeenAt: timestamp('first_seen_at', { withTimezone: true }).defaultNow().notNull(),
   lastEventAt: timestamp('last_event_at', { withTimezone: true }).defaultNow().notNull(),
@@ -110,9 +109,9 @@ export const claims = pgTable('claims', {
   id: uuid('id').defaultRandom().primaryKey(),
   storyClusterId: uuid('story_cluster_id').notNull().references(() => storyClusters.id, { onDelete: 'cascade' }),
   claimText: text('claim_text').notNull(),
-  claimType: varchar('claim_type', { length: 100 }).notNull(), // 'benchmark_result', 'product_release', 'quote', 'architecture', 'policy'
+  claimType: varchar('claim_type', { length: 100 }).notNull(),
   extractedFromRawId: uuid('extracted_from_raw_id').references(() => rawArticles.id, { onDelete: 'set null' }),
-  verificationStatus: varchar('verification_status', { length: 50 }).notNull().default('unverified'), // 'unverified', 'verified_primary', 'verified_corroborated', 'disputed'
+  verificationStatus: varchar('verification_status', { length: 50 }).notNull().default('unverified'),
   confidenceScore: numeric('confidence_score', { precision: 3, scale: 2 }).notNull().default('0.00'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
@@ -125,7 +124,7 @@ export const evidences = pgTable('evidences', {
   sourceName: varchar('source_name', { length: 255 }).notNull(),
   sourceTier: varchar('source_tier', { length: 50 }).notNull().default('tier_2_verified'),
   verbatimExcerpt: text('verbatim_excerpt').notNull(),
-  entailment: varchar('entailment', { length: 50 }).notNull(), // 'supports', 'refutes', 'inconclusive'
+  entailment: varchar('entailment', { length: 50 }).notNull(),
   rationale: text('rationale').notNull(),
   verifiedAt: timestamp('verified_at', { withTimezone: true }).defaultNow().notNull(),
 });
@@ -141,7 +140,7 @@ export const articles = pgTable(
     deck: text('deck').notNull(),
     contentMarkdown: text('content_markdown').notNull(),
     metaDescription: varchar('meta_description', { length: 320 }).notNull(),
-    status: varchar('status', { length: 50 }).notNull().default('draft'), // 'draft', 'review_pending', 'approved', 'published', 'rejected'
+    status: varchar('status', { length: 50 }).notNull().default('draft'),
     confidenceScore: numeric('confidence_score', { precision: 3, scale: 2 }).notNull().default('0.00'),
     nGramMaxSimilarity: numeric('n_gram_max_similarity', { precision: 3, scale: 2 }).notNull().default('0.00'),
     readingTimeMinutes: integer('reading_time_minutes').notNull().default(3),
@@ -190,7 +189,7 @@ export const agentRuns = pgTable('agent_runs', {
   completionTokens: integer('completion_tokens').notNull().default(0),
   totalCostUsd: numeric('total_cost_usd', { precision: 8, scale: 6 }).notNull().default('0.000000'),
   latencyMs: integer('latency_ms').notNull().default(0),
-  status: varchar('status', { length: 50 }).notNull(), // 'success', 'failed', 'retrying'
+  status: varchar('status', { length: 50 }).notNull(),
   errorMessage: text('error_message'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });

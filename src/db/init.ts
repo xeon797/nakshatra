@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS raw_articles (
     summary_excerpt TEXT,
     published_at TIMESTAMPTZ,
     content_hash VARCHAR(64) NOT NULL,
-    simhash_fingerprint BIGINT,
+    simhash_fingerprint VARCHAR(64),
     processing_status VARCHAR(50) NOT NULL DEFAULT 'ingested',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
