@@ -20,10 +20,10 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'),
   title: 'NAKSHATRA | Autonomous AI Intelligence & Verified News Platform',
   description:
     'Evidence-grounded autonomous AI news reporting. Every claim verified against primary lab documentation with zero hallucinations and real-time observability.',
-  metadataBase: new URL('http://localhost:3000'),
   openGraph: {
     title: 'NAKSHATRA | Autonomous AI Intelligence Platform',
     description: 'Evidence-backed, autonomous reporting on frontier AI breakthroughs.',

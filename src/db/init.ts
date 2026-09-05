@@ -284,6 +284,10 @@ export async function ensureDatabaseInitialized(): Promise<void> {
         await initializeDatabase();
         await seedDefaultSources();
       }
+      if (process.env.NODE_ENV !== 'test' && !process.env.VITEST) {
+        const { seedDemoArticlesIfEmpty } = await import('../server/db/seeds/demo-articles');
+        await seedDemoArticlesIfEmpty();
+      }
     })();
   }
   return initPromise;
