@@ -1,5 +1,17 @@
 import { z } from 'zod';
 
+const optionalPrefixedKey = (prefix: string) =>
+  z.preprocess(
+    (val) => (typeof val === 'string' && val.trim() === '' ? undefined : val),
+    z
+      .string()
+      .min(5)
+      .refine((val) => val.startsWith(prefix), {
+        message: `Must start with '${prefix}'`,
+      })
+      .optional()
+  );
+
 const envSchema = z.object({
   GEMINI_API_KEY: z.string().optional().default(''),
   GEMINI_MODEL: z.string().default('gemini-2.5-flash'),
@@ -7,7 +19,9 @@ const envSchema = z.object({
   DATABASE_URL: z.string().optional(),
   ADMIN_API_SECRET: z.string().default('dev-secret-nakshatra-key'),
   CRON_SECRET: z.string().default('dev-cron-secret-nakshatra'),
-  RESEND_API_KEY: z.string().optional(),
+  RESEND_API_KEY: optionalPrefixedKey('re_'),
+  TAVILY_API_KEY: optionalPrefixedKey('tvly-'),
+  JINA_API_KEY: optionalPrefixedKey('jina_'),
   NEWSLETTER_FROM_EMAIL: z.string().default('briefings@nakshatra.ai'),
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   NEXT_PUBLIC_APP_URL: z.string().default('http://localhost:3000'),
@@ -25,6 +39,8 @@ export function parseEnv(rawEnv: Record<string, string | undefined> = process.en
     ADMIN_API_SECRET: rawEnv.ADMIN_API_SECRET,
     CRON_SECRET: rawEnv.CRON_SECRET,
     RESEND_API_KEY: rawEnv.RESEND_API_KEY,
+    TAVILY_API_KEY: rawEnv.TAVILY_API_KEY,
+    JINA_API_KEY: rawEnv.JINA_API_KEY,
     NEWSLETTER_FROM_EMAIL: rawEnv.NEWSLETTER_FROM_EMAIL,
     NODE_ENV: rawEnv.NODE_ENV,
     NEXT_PUBLIC_APP_URL: rawEnv.NEXT_PUBLIC_APP_URL,

@@ -23,6 +23,16 @@ export interface DailyDigestResult {
   errors: string[];
   mockMode: boolean;
   topStoryTitle?: string;
+  campaignId?: string;
+}
+
+export function getDefaultFromEmail(): string {
+  if (process.env.NEWSLETTER_FROM_EMAIL && process.env.NEWSLETTER_FROM_EMAIL.trim().length > 0) {
+    return process.env.NEWSLETTER_FROM_EMAIL;
+  }
+  return process.env.NODE_ENV === 'production'
+    ? 'NAKSHATRA Dispatch <newsletter@nakshatra.news>'
+    : 'NAKSHATRA Dispatch <onboarding@resend.dev>';
 }
 
 export class NewsletterService {
@@ -36,7 +46,8 @@ export class NewsletterService {
       return;
     }
 
-    const key = options?.resendApiKey || process.env.RESEND_API_KEY;
+    const isTest = process.env.NODE_ENV === 'test';
+    const key = options?.resendApiKey || (!isTest ? process.env.RESEND_API_KEY : undefined);
     if (key && key.trim().length > 0 && !key.includes('placeholder')) {
       this.resendClient = new Resend(key);
       this.isMock = false;
@@ -241,6 +252,8 @@ export class NewsletterService {
   async sendDailyDigest(options?: {
     lookbackHours?: number;
     subscribersOverride?: Array<typeof schema.subscribers.$inferSelect>;
+    recordCampaign?: boolean;
+    batchDelayMs?: number;
   }): Promise<DailyDigestResult> {
     const db = await getDb();
     const digestPayload = await this.compileDigestPayload(options?.lookbackHours ?? 24);
@@ -274,9 +287,11 @@ export class NewsletterService {
     const bnHtmlContent = renderDailyDigestBnHtml(digestPayload);
     const enSubject = `NAKSHATRA Daily: ${digestPayload.topStory?.titleEn || digestPayload.topStory?.title || 'Frontier AI Intelligence Briefing'}`;
     const bnSubject = `নক্ষত্র দৈনিক এআই ব্রিফিং: ${digestPayload.topStory?.titleBn || digestPayload.topStory?.title || 'ফ্রন্টিয়ার এআই ইন্টেলিজেন্স'}`;
+    const fromAddress = getDefaultFromEmail();
 
+    // 1. Filter subscribers matching preferences
+    const matchingSubscribers: Array<typeof schema.subscribers.$inferSelect> = [];
     for (const sub of activeSubscribers) {
-      // Check if subscriber wants this content
       const userTopics = sub.topics || [];
       const matchesTopic =
         userTopics.includes('all') ||
@@ -284,32 +299,75 @@ export class NewsletterService {
         digestPayload.categoryHighlights.some((c) => userTopics.includes(c.category)) ||
         (digestPayload.topStory && userTopics.includes(digestPayload.topStory.category));
 
-      if (!matchesTopic) {
+      if (matchesTopic) {
+        matchingSubscribers.push(sub);
+      } else {
         result.emailsSkipped++;
-        continue;
+      }
+    }
+
+    // 2. Batch processing in chunks of 50 with 250ms spacing between batches
+    const CHUNK_SIZE = 50;
+    const batchDelayMs = options?.batchDelayMs ?? (process.env.NODE_ENV === 'test' ? 0 : 250);
+
+    for (let i = 0; i < matchingSubscribers.length; i += CHUNK_SIZE) {
+      const batch = matchingSubscribers.slice(i, i + CHUNK_SIZE);
+
+      for (const sub of batch) {
+        result.subscribersMatched++;
+
+        const isBn = sub.preferredLanguage === 'bn';
+        const htmlContent = isBn ? bnHtmlContent : enHtmlContent;
+        const subject = isBn ? bnSubject : enSubject;
+
+        if (this.isMock || !this.resendClient) {
+          if (process.env.NODE_ENV === 'development') {
+            console.log(`[Mock Newsletter] Dispatching ${isBn ? 'Bengali' : 'English'} digest to ${sub.email}`);
+          }
+          result.emailsSent++;
+        } else {
+          try {
+            await this.resendClient.emails.send({
+              from: fromAddress,
+              to: sub.email,
+              subject,
+              html: htmlContent,
+            });
+            result.emailsSent++;
+          } catch (err: any) {
+            result.errors.push(`Failed to send to ${sub.email}: ${err.message || String(err)}`);
+          }
+        }
       }
 
-      result.subscribersMatched++;
+      // 250ms pause between batches to prevent rate-limit rejections
+      if (i + CHUNK_SIZE < matchingSubscribers.length && batchDelayMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, batchDelayMs));
+      }
+    }
 
-      const isBn = sub.preferredLanguage === 'bn';
-      const htmlContent = isBn ? bnHtmlContent : enHtmlContent;
-      const subject = isBn ? bnSubject : enSubject;
+    // 3. Optional campaign recording into newsletter_campaigns
+    if (options?.recordCampaign) {
+      try {
+        const [campaign] = await db
+          .insert(schema.newsletterCampaigns)
+          .values({
+            subjectEn: enSubject,
+            subjectBn: bnSubject,
+            sentCount: result.emailsSent,
+            skippedCount: result.emailsSkipped,
+            failedCount: result.errors.length,
+            recipientsCount: activeSubscribers.length,
+            errorLog: result.errors.length > 0 ? result.errors.slice(0, 10).join('; ') : null,
+            sentAt: new Date(),
+          })
+          .returning();
 
-      if (this.isMock || !this.resendClient) {
-        // Safe mock delivery
-        result.emailsSent++;
-      } else {
-        try {
-          await this.resendClient.emails.send({
-            from: process.env.NEWSLETTER_FROM_EMAIL || 'briefings@nakshatra.ai',
-            to: sub.email,
-            subject,
-            html: htmlContent,
-          });
-          result.emailsSent++;
-        } catch (err: any) {
-          result.errors.push(`Failed to send to ${sub.email}: ${err.message || String(err)}`);
+        if (campaign) {
+          result.campaignId = campaign.id;
         }
+      } catch {
+        // Fallback gracefully if database campaign recording encounters an issue
       }
     }
 

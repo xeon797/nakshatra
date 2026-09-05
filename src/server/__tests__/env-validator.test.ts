@@ -1,4 +1,4 @@
-﻿import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { parseEnv, validateProductionEnv } from '../../lib/env';
 import { timingSafeCompare, verifyCronSecret, getCronSecret } from '../../lib/auth';
 
@@ -50,6 +50,57 @@ describe('Environment Variable Validator & Security Auditing', () => {
     } catch (err: any) {
       expect(err.message).not.toContain('super-sensitive-secret-token-12345');
       expect(err.message).toContain('Environment validation failed');
+    }
+  });
+
+  it('validates and accepts valid RESEND, TAVILY, and JINA API keys with prefixes', () => {
+    const parsed = parseEnv({
+      NODE_ENV: 'test',
+      RESEND_API_KEY: 're_mock_123456789',
+      TAVILY_API_KEY: 'tvly-mock-123456789',
+      JINA_API_KEY: 'jina_mock_123456789',
+    });
+
+    expect(parsed.RESEND_API_KEY).toBe('re_mock_123456789');
+    expect(parsed.TAVILY_API_KEY).toBe('tvly-mock-123456789');
+    expect(parsed.JINA_API_KEY).toBe('jina_mock_123456789');
+  });
+
+  it('rejects improperly formatted external service keys without leaking secret values', () => {
+    const invalidSecret = 'invalid_secret_resend_99999';
+    try {
+      parseEnv({
+        NODE_ENV: 'test',
+        RESEND_API_KEY: invalidSecret,
+      });
+      expect.unreachable('Should have rejected invalid RESEND key');
+    } catch (err: any) {
+      expect(err.message).not.toContain(invalidSecret);
+      expect(err.message).toContain("Must start with 're_'");
+    }
+
+    const invalidTavily = 'wrong_tavily_key_11111';
+    try {
+      parseEnv({
+        NODE_ENV: 'test',
+        TAVILY_API_KEY: invalidTavily,
+      });
+      expect.unreachable('Should have rejected invalid TAVILY key');
+    } catch (err: any) {
+      expect(err.message).not.toContain(invalidTavily);
+      expect(err.message).toContain("Must start with 'tvly-'");
+    }
+
+    const invalidJina = 'wrong_jina_key_22222';
+    try {
+      parseEnv({
+        NODE_ENV: 'test',
+        JINA_API_KEY: invalidJina,
+      });
+      expect.unreachable('Should have rejected invalid JINA key');
+    } catch (err: any) {
+      expect(err.message).not.toContain(invalidJina);
+      expect(err.message).toContain("Must start with 'jina_'");
     }
   });
 

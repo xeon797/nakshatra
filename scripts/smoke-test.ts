@@ -1,6 +1,7 @@
 import * as dotenv from 'dotenv';
 dotenv.config({ path: '.env.local' });
 dotenv.config();
+process.env.TEST_LIVE_EXTERNAL = 'true';
 
 import { getDb } from '../src/db';
 import * as schema from '../src/db/schema';
@@ -114,14 +115,10 @@ export async function runSmokeTest(): Promise<void> {
   const clusters = await clusterer.processUnclustered(10);
   console.log(`   ✓ Clustering produced ${clusters.length} stories.`);
 
-  // Find target story
-  const [targetStory] = await db
-    .select()
-    .from(schema.stories)
-    .limit(1);
-
+  // Find target story that was just clustered from the live ingested articles
+  const targetStory = clusters.length > 0 ? clusters[0].story : null;
   if (!targetStory) {
-    throw new Error('No stories found in database after clustering.');
+    throw new Error('No story clusters were produced from clustering.');
   }
 
   // Ensure editorial_status is auto_approved for writer synthesis

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { AiModelProvider } from '../ai/provider';
 import { AgentAuditLogger } from './audit-logger';
+import { searchSecondarySources } from '../../server/services/external-research';
 
 export const VerificationVerdictSchema = z.object({
   entailment: z.enum(['supports', 'refutes', 'inconclusive']).describe('Whether the source text supports, refutes, or is inconclusive about the claim.'),
@@ -165,6 +166,64 @@ Determine whether the source SUPPORTS, REFUTES, or is INCONCLUSIVE regarding the
           verificationStatus = 'verified_corroborated';
         } else if (supportsCount === 1) {
           verificationStatus = 'verified_primary'; // Single verified source in MVP
+        }
+
+        // Corroborate controversial/unverified claims using Tavily secondary source discovery
+        if (verificationStatus === 'disputed' || verificationStatus === 'unverified') {
+          try {
+            const secondaryResults = await searchSecondarySources(claim.claimText);
+            for (let sIdx = 0; sIdx < secondaryResults.length; sIdx++) {
+              const secRes = secondaryResults[sIdx];
+              if (!secRes.content || secRes.content.length < 30) continue;
+              const secDoc: SourceDocument = {
+                id: `tavily-sec-${sIdx}`,
+                url: secRes.url,
+                sourceName: secRes.title || 'Secondary Verification Source',
+                sourceTier: 'tier_2_verified',
+                text: secRes.content,
+              };
+
+              const secVerdict = await this.verifyClaimAgainstSource({
+                claimText: claim.claimText,
+                source: secDoc,
+              });
+
+              totalPromptTokens += secVerdict.promptTokens ?? 0;
+              totalCompletionTokens += secVerdict.completionTokens ?? 0;
+
+              evidences.push({
+                sourceUrl: secDoc.url,
+                sourceName: secDoc.sourceName,
+                sourceTier: secDoc.sourceTier,
+                verbatimExcerpt: secVerdict.verbatimExcerpt,
+                entailment: secVerdict.entailment,
+                rationale: secVerdict.rationale,
+              });
+
+              if (secVerdict.entailment === 'supports') {
+                supportsCount++;
+                if (secVerdict.confidenceScore > maxConfidence) {
+                  maxConfidence = secVerdict.confidenceScore;
+                }
+              } else if (secVerdict.entailment === 'refutes') {
+                refutesCount++;
+              }
+            }
+
+            if (refutesCount > 0 && supportsCount === 0) {
+              verificationStatus = 'debunked';
+            } else if (refutesCount > 0 && supportsCount > 0) {
+              verificationStatus = 'disputed';
+            } else if (hasPrimarySupport) {
+              verificationStatus = 'verified_primary';
+            } else if (supportsCount >= 2) {
+              verificationStatus = 'verified_corroborated';
+            } else if (supportsCount === 1) {
+              verificationStatus = 'verified_primary';
+            }
+          } catch {
+            // Secondary corroboration fallback
+          }
         }
 
         outcomes.push({

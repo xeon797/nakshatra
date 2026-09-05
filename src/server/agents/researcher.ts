@@ -6,6 +6,7 @@ import { FactVerificationAgent, SourceDocument } from '../../services/research/f
 import { AiModelProvider } from '../../services/ai/provider';
 import { getAiProvider } from '../../services/ai/factory';
 import { AgentAuditLogger } from '../../services/research/audit-logger';
+import { extractCleanMarkdown } from '../services/external-research';
 
 export interface SourceInput {
   title: string;
@@ -94,6 +95,20 @@ export class MultiSourceResearcherAgent {
     // Fallback if none marked primary: make first one primary
     if (primarySources.length === 0 && secondarySources.length > 0) {
       primarySources.push(secondarySources.shift()!);
+    }
+
+    // Enrich shallow primary sources (< 500 chars) with Jina Reader full-text markdown
+    for (const pSrc of primarySources) {
+      if (pSrc.url && pSrc.url.startsWith('http') && (!pSrc.text || pSrc.text.trim().length < 500)) {
+        try {
+          const fullMarkdown = await extractCleanMarkdown(pSrc.url, pSrc.text);
+          if (fullMarkdown && fullMarkdown.length > pSrc.text.length) {
+            pSrc.text = fullMarkdown;
+          }
+        } catch {
+          // Fallback cleanly to RSS text
+        }
+      }
     }
 
     // 3. Extract claims from primary and secondary sources
