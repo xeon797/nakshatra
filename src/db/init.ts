@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS raw_articles (
     content_hash VARCHAR(64) NOT NULL,
     simhash_fingerprint VARCHAR(64),
     processing_status VARCHAR(50) NOT NULL DEFAULT 'ingested',
+    image_url TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -99,6 +100,7 @@ CREATE TABLE IF NOT EXISTS articles (
     n_gram_max_similarity NUMERIC(3, 2) NOT NULL DEFAULT 0.00,
     reading_time_minutes INT NOT NULL DEFAULT 3,
     hero_image_url VARCHAR(1000),
+    image_url TEXT,
     published_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -274,6 +276,13 @@ export async function initializeDatabase(): Promise<void> {
   for (const statement of statements) {
     await db.execute(sql.raw(statement));
   }
+
+  try {
+    await db.execute(sql.raw('ALTER TABLE raw_articles ADD COLUMN IF NOT EXISTS image_url text;'));
+    await db.execute(sql.raw('ALTER TABLE articles ADD COLUMN IF NOT EXISTS image_url text;'));
+  } catch {
+    // Ignored if column already exists
+  }
 }
 
 export async function ensureDatabaseInitialized(): Promise<void> {
@@ -283,6 +292,14 @@ export async function ensureDatabaseInitialized(): Promise<void> {
       if (!alreadyInitialized) {
         await initializeDatabase();
         await seedDefaultSources();
+      } else {
+        const db = await getDb();
+        try {
+          await db.execute(sql.raw('ALTER TABLE raw_articles ADD COLUMN IF NOT EXISTS image_url text;'));
+          await db.execute(sql.raw('ALTER TABLE articles ADD COLUMN IF NOT EXISTS image_url text;'));
+        } catch {
+          // Ignored if column exists
+        }
       }
       if (process.env.NODE_ENV !== 'test' && !process.env.VITEST) {
         const { seedDemoArticlesIfEmpty } = await import('../server/db/seeds/demo-articles');

@@ -8,35 +8,35 @@ export function LanguageToggle() {
   const { language, setLanguage } = useLanguage();
 
   return (
-    <div className="inline-flex items-center rounded-xl bg-slate-900 border border-slate-800 p-1 shadow-inner">
-      <Globe className="w-3.5 h-3.5 text-slate-500 ml-1.5 mr-1 hidden sm:inline" />
-
+    <div className="inline-flex items-center bg-white border border-[#d9d9d9] p-0.5" style={{ borderRadius: 0 }}>
       {/* English Button */}
       <button
         type="button"
         onClick={() => setLanguage('en')}
-        className={`px-2.5 py-1 rounded-lg text-xs font-display font-bold transition-all ${
+        className={`px-2.5 py-1 text-xs font-display font-bold transition-colors ${
           language === 'en'
-            ? 'bg-sky-500 text-slate-950 shadow-sm'
-            : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+            ? 'bg-[#1e0a3c] text-white'
+            : 'bg-white text-[#120424] hover:bg-[#fdfbe4]'
         }`}
+        style={{ borderRadius: 0 }}
         aria-label="Switch to English"
       >
         EN
       </button>
 
       {/* Divider */}
-      <span className="text-slate-700 text-xs px-0.5">|</span>
+      <span className="text-[#d9d9d9] text-xs px-1 select-none">|</span>
 
       {/* Bengali Button */}
       <button
         type="button"
         onClick={() => setLanguage('bn')}
-        className={`px-2.5 py-1 rounded-lg text-xs font-bengali font-bold transition-all ${
+        className={`px-2.5 py-1 text-xs font-bengali font-bold transition-colors ${
           language === 'bn'
-            ? 'bg-sky-500 text-slate-950 shadow-sm'
-            : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+            ? 'bg-[#1e0a3c] text-white'
+            : 'bg-white text-[#120424] hover:bg-[#fdfbe4]'
         }`}
+        style={{ borderRadius: 0 }}
         aria-label="বাংলা ভাষায় পরিবর্তন করুন"
       >
         বাংলা

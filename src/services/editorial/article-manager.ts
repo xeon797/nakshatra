@@ -1,6 +1,6 @@
 import { getDb } from '../../db';
 import * as schema from '../../db/schema';
-import { eq, desc } from 'drizzle-orm';
+import { eq, desc, and } from 'drizzle-orm';
 import { SynthesisResult, VerifiedClaimInput } from './synthesis-agent';
 
 export class ArticleManager {
@@ -69,6 +69,37 @@ export class ArticleManager {
     const keyTakeawaysEn = bDraft?.en?.keyTakeaways || [];
     const keyTakeawaysBn = bDraft?.bn?.keyTakeaways || [];
 
+    // Inherit image_url from primary source linked to story or storyCluster
+    let imageUrl: string | null = null;
+    if (params.storyId) {
+      const primarySource = await db
+        .select({ imageUrl: schema.rawArticles.imageUrl })
+        .from(schema.storySources)
+        .innerJoin(schema.rawArticles, eq(schema.storySources.rawArticleId, schema.rawArticles.id))
+        .where(and(eq(schema.storySources.storyId, params.storyId), eq(schema.storySources.isPrimary, true)))
+        .limit(1);
+
+      imageUrl = primarySource[0]?.imageUrl || null;
+
+      if (!imageUrl) {
+        const anySource = await db
+          .select({ imageUrl: schema.rawArticles.imageUrl })
+          .from(schema.storySources)
+          .innerJoin(schema.rawArticles, eq(schema.storySources.rawArticleId, schema.rawArticles.id))
+          .where(eq(schema.storySources.storyId, params.storyId))
+          .limit(1);
+        imageUrl = anySource[0]?.imageUrl || null;
+      }
+    } else if (params.storyClusterId) {
+      const clusterSource = await db
+        .select({ imageUrl: schema.rawArticles.imageUrl })
+        .from(schema.storyClusterSources)
+        .innerJoin(schema.rawArticles, eq(schema.storyClusterSources.rawArticleId, schema.rawArticles.id))
+        .where(eq(schema.storyClusterSources.storyClusterId, params.storyClusterId))
+        .limit(1);
+      imageUrl = clusterSource[0]?.imageUrl || null;
+    }
+
     // 1. Insert Article
     const [insertedArticle] = await db
       .insert(schema.articles)
@@ -92,6 +123,8 @@ export class ArticleManager {
         confidenceScore: avgConfidence,
         nGramMaxSimilarity: plagiarismAudit.maxSimilarity.toString(),
         readingTimeMinutes,
+        imageUrl: imageUrl || null,
+        heroImageUrl: imageUrl || null,
       })
       .returning();
 

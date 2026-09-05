@@ -12,6 +12,19 @@ const config: Config = {
       colors: {
         background: 'var(--background)',
         foreground: 'var(--foreground)',
+        broadsheet: {
+          magenta: '#d91b74',
+          plum: '#1e0a3c',
+          ink: '#120424',
+          cream: '#fdfcf3',
+          white: '#ffffff',
+          margin: '#fdfbe4',
+          evidence: '#f1ebfc',
+          hairline: '#d9d9d9',
+          caption: '#6e6e6e',
+          mute: '#b3b3b3',
+          violet: '#7b3fe4',
+        },
         primary: {
           50: '#f0fdf4',
           100: '#dcfce7',

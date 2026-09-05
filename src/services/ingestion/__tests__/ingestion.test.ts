@@ -99,6 +99,7 @@ describe('Feature 2: Ingestion & Deduplication Pipeline', () => {
             <title>Gemini 2.5: Our Next Generation Multimodal Model</title>
             <link>https://deepmind.google/discover/blog/gemini-2-5/?utm_source=feed</link>
             <pubDate>Fri, 04 Sep 2026 12:00:00 GMT</pubDate>
+            <enclosure url="https://deepmind.google/images/gemini-2-5-hero.jpg" type="image/jpeg" />
             <content:encoded><![CDATA[<p>Today we introduce Gemini 2.5, delivering state-of-the-art multimodal reasoning.</p>]]></content:encoded>
           </item>
           <item>
@@ -138,6 +139,7 @@ describe('Feature 2: Ingestion & Deduplication Pipeline', () => {
       expect(inserted.length).toBe(2);
       expect(inserted[0].canonicalUrl).not.toContain('utm_source');
       expect(inserted[0].contentHash).toBeDefined();
+      expect(inserted[0].imageUrl).toBe('https://deepmind.google/images/gemini-2-5-hero.jpg');
 
       // Second ingestion pass: should recognize all as exact duplicates
       const secondPass = await ingestionService.ingestSource(source, mockRssXml);

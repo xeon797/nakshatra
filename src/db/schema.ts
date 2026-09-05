@@ -71,6 +71,7 @@ export const rawArticles = pgTable(
     contentHash: varchar('content_hash', { length: 64 }).notNull(),
     simhashFingerprint: varchar('simhash_fingerprint', { length: 64 }),
     processingStatus: varchar('processing_status', { length: 50 }).notNull().default('ingested'),
+    imageUrl: text('image_url'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
@@ -156,6 +157,7 @@ export const articles = pgTable(
     nGramMaxSimilarity: numeric('n_gram_max_similarity', { precision: 3, scale: 2 }).notNull().default('0.00'),
     readingTimeMinutes: integer('reading_time_minutes').notNull().default(3),
     heroImageUrl: varchar('hero_image_url', { length: 1000 }),
+    imageUrl: text('image_url'),
     publishedAt: timestamp('published_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),

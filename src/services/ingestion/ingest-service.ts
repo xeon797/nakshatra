@@ -121,6 +121,7 @@ export class IngestionService {
             contentHash: item.contentHash,
             simhashFingerprint: item.simhashFingerprint.toString(),
             processingStatus: 'ingested',
+            imageUrl: item.imageUrl || null,
           })
           .returning();
 

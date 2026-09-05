@@ -5,14 +5,26 @@
 @tailwind utilities;
 
 :root {
-  --background: #090d16;
-  --foreground: #f1f5f9;
-  --card-bg: #111827;
-  --border-color: #1e293b;
-  --accent: #38bdf8;
-  --accent-glow: rgba(56, 189, 248, 0.15);
+  --color-signal-magenta: #d91b74;
+  --color-nocturne-plum: #1e0a3c;
+  --color-ink-black: #120424;
+  --color-newsprint-cream: #fdfcf3;
+  --color-broadsheet-white: #ffffff;
+  --color-margin-tint: #fdfbe4;
+  --color-evidence-plum: #f1ebfc;
+  --color-rule-hairline: #d9d9d9;
+  --color-caption-slate: #6e6e6e;
+  --color-mute-slate: #b3b3b3;
+  --color-signal-violet: #7b3fe4;
+
+  --background: #fdfcf3;
+  --foreground: #120424;
+  --card-bg: #ffffff;
+  --border-color: #d9d9d9;
+
   --font-satoshi: 'Satoshi', 'General Sans', sans-serif;
   --font-body: 'General Sans', sans-serif;
+  --font-bengali: 'Hind Siliguri', sans-serif;
 }
 
 body {
@@ -22,21 +34,27 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* Broadsheet Discipline: Zero drop shadows across the site */
+*, *::before, *::after {
+  box-shadow: none !important;
+}
+
 /* Bengali Typography: relaxed leading to prevent conjunct / vowel clipping */
 html[lang="bn"],
 .lang-bn,
 .font-bengali {
   font-family: var(--font-bengali), 'Hind Siliguri', sans-serif;
   line-height: 1.75;
+  letter-spacing: 0.01em;
 }
 
-.lang-bn h1,
-.lang-bn h2,
-.lang-bn h3,
-.lang-bn h4 {
+html[lang="bn"] h1,
+html[lang="bn"] h2,
+html[lang="bn"] h3,
+html[lang="bn"] h4 {
   font-family: var(--font-bengali), sans-serif;
-  line-height: 1.4;
-  letter-spacing: normal;
+  line-height: 1.45;
+  letter-spacing: 0em;
 }
 
 /* English Typography: Satoshi for Display, General Sans for Body */
@@ -49,17 +67,25 @@ html[lang="en"] h4,
   letter-spacing: -0.02em;
 }
 
-.gradient-title {
-  background: linear-gradient(135deg, #38bdf8 0%, #818cf8 50%, #c084fc 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-}
-
+/* Broadsheet Card hover without shadow */
 .card-hover {
-  transition: all 0.2s ease-in-out;
+  transition: border-color 0.15s ease-in-out;
 }
 .card-hover:hover {
-  transform: translateY(-2px);
-  border-color: #38bdf8;
-  box-shadow: 0 10px 25px -5px var(--accent-glow);
+  border-color: var(--color-ink-black);
+}
+
+/* Custom scrollbars with broadsheet slate */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #fdfcf3;
+}
+::-webkit-scrollbar-thumb {
+  background: #d9d9d9;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #b3b3b3;
 }

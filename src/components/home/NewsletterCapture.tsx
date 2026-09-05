@@ -68,17 +68,20 @@ export function NewsletterCapture() {
   return (
     <section
       id="newsletter-subscribe"
-      className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-900 via-indigo-950/40 to-slate-900 border border-slate-800 p-8 sm:p-12 shadow-2xl scroll-mt-24"
+      className="bg-[#ffffff] border border-[#d9d9d9] p-8 sm:p-12 scroll-mt-24"
+      style={{ borderRadius: 0 }}
     >
-      <div className="absolute top-0 right-0 -mt-8 -mr-8 w-64 h-64 bg-sky-500/10 rounded-full blur-3xl pointer-events-none" />
       <div className="max-w-2xl mx-auto text-center space-y-6">
-        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-sky-500/10 border border-sky-500/30 text-sky-400 text-xs font-semibold tracking-wider uppercase">
-          <Sparkles className="w-3.5 h-3.5" />
+        <div
+          className="inline-flex items-center gap-2 px-3 py-1 bg-[#f1ebfc] border border-[#d9d9d9] text-[#1e0a3c] text-xs font-mono font-bold tracking-wider uppercase"
+          style={{ borderRadius: 0 }}
+        >
+          <Sparkles className="w-3.5 h-3.5 text-[#d91b74]" />
           <span>{isBn ? 'শূন্য-বিভ্রান্তি গোয়েন্দা ব্রিফিং' : 'Zero-Hallucination Intelligence Briefing'}</span>
         </div>
 
         <h2
-          className={`text-2xl sm:text-4xl font-extrabold text-white tracking-tight ${
+          className={`text-2xl sm:text-4xl font-black text-[#120424] tracking-tight ${
             isBn ? 'font-bengali leading-[1.3]' : 'font-display leading-tight'
           }`}
         >
@@ -86,7 +89,7 @@ export function NewsletterCapture() {
         </h2>
 
         <p
-          className={`text-slate-300 text-sm sm:text-base ${
+          className={`text-[#6e6e6e] text-sm sm:text-base ${
             isBn ? 'font-bengali leading-[1.75]' : 'leading-relaxed'
           }`}
         >
@@ -94,15 +97,18 @@ export function NewsletterCapture() {
         </p>
 
         {status === 'success' ? (
-          <div className="p-6 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex flex-col items-center gap-2 text-emerald-400">
-            <CheckCircle2 className="w-8 h-8" />
-            <h3 className={`font-bold text-lg text-white ${isBn ? 'font-bengali' : ''}`}>
+          <div
+            className="p-6 bg-[#fdfbe4] border border-[#d9d9d9] flex flex-col items-center gap-2 text-[#1e0a3c]"
+            style={{ borderRadius: 0 }}
+          >
+            <CheckCircle2 className="w-8 h-8 text-[#1e0a3c]" />
+            <h3 className={`font-bold text-lg text-[#120424] ${isBn ? 'font-bengali' : 'font-display'}`}>
               {t.subscribeSuccess}
             </h3>
-            <p className={`text-sm text-slate-300 ${isBn ? 'font-bengali' : ''}`}>{message}</p>
+            <p className={`text-sm text-[#6e6e6e] ${isBn ? 'font-bengali' : ''}`}>{message}</p>
             <button
               onClick={() => setStatus('idle')}
-              className={`mt-3 text-xs text-sky-400 hover:underline font-medium ${isBn ? 'font-bengali' : ''}`}
+              className={`mt-3 text-xs text-[#d91b74] hover:underline font-bold uppercase tracking-wider font-display ${isBn ? 'font-bengali' : ''}`}
             >
               {isBn ? 'অন্য ইমেইল সাবস্ক্রাইব করুন →' : 'Subscribe another email \u2192'}
             </button>
@@ -111,7 +117,7 @@ export function NewsletterCapture() {
           <form onSubmit={handleSubmit} className="space-y-5 text-left">
             {/* Topic Preferences */}
             <div>
-              <label className={`block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2.5 ${isBn ? 'font-bengali' : ''}`}>
+              <label className={`block text-xs font-bold text-[#1e0a3c] uppercase tracking-wider mb-2.5 font-display ${isBn ? 'font-bengali' : ''}`}>
                 {t.customizeTopics}
               </label>
               <div className="flex flex-wrap gap-2">
@@ -122,17 +128,18 @@ export function NewsletterCapture() {
                       type="button"
                       key={opt.id}
                       onClick={() => toggleTopic(opt.id)}
-                      className={`text-xs px-3 py-1.5 rounded-lg border transition-all font-medium flex items-center gap-1.5 ${
+                      className={`text-xs px-3 py-1.5 border font-mono font-medium transition-colors flex items-center gap-1.5 ${
                         isBn ? 'font-bengali' : ''
                       } ${
                         isChecked
-                          ? 'bg-sky-500/20 border-sky-500/50 text-sky-300 font-semibold shadow-sm'
-                          : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-300'
+                          ? 'bg-[#1e0a3c] border-[#1e0a3c] text-white font-bold'
+                          : 'bg-[#ffffff] border-[#d9d9d9] text-[#6e6e6e] hover:bg-[#fdfbe4] hover:text-[#120424]'
                       }`}
+                      style={{ borderRadius: 0 }}
                     >
                       <span
-                        className={`w-2 h-2 rounded-full ${
-                          isChecked ? 'bg-sky-400' : 'bg-slate-600'
+                        className={`w-1.5 h-1.5 ${
+                          isChecked ? 'bg-[#d91b74]' : 'bg-[#d9d9d9]'
                         }`}
                       />
                       {opt.label}
@@ -145,25 +152,27 @@ export function NewsletterCapture() {
             {/* Email Form */}
             <div className="flex flex-col sm:flex-row gap-3">
               <div className="relative flex-1">
-                <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[#6e6e6e]" />
                 <input
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder={t.emailPlaceholder}
                   required
-                  className={`w-full pl-10 pr-4 py-3 rounded-xl bg-slate-950/90 border border-slate-800 text-white placeholder-slate-500 text-sm focus:outline-none focus:border-sky-500 transition-colors ${
+                  className={`w-full pl-10 pr-4 py-2.5 bg-[#ffffff] border border-[#d9d9d9] text-[#120424] placeholder-[#6e6e6e] text-sm focus:outline-none focus:border-[#120424] transition-colors ${
                     isBn ? 'font-bengali' : ''
                   }`}
+                  style={{ borderRadius: 0 }}
                 />
               </div>
 
               <button
                 type="submit"
                 disabled={status === 'loading'}
-                className={`px-6 py-3 rounded-xl bg-sky-500 hover:bg-sky-400 disabled:bg-slate-800 text-slate-950 font-bold text-sm transition-all shadow-lg shadow-sky-500/25 flex items-center justify-center gap-2 whitespace-nowrap ${
+                className={`px-6 py-2.5 bg-[#d91b74] hover:bg-[#bf1363] disabled:bg-[#d9d9d9] text-white font-bold text-xs uppercase tracking-wider font-display transition-colors flex items-center justify-center gap-2 whitespace-nowrap ${
                   isBn ? 'font-bengali' : ''
                 }`}
+                style={{ borderRadius: 0 }}
               >
                 {status === 'loading' ? (
                   <>
@@ -177,13 +186,13 @@ export function NewsletterCapture() {
             </div>
 
             {status === 'error' && (
-              <div className="flex items-center gap-2 text-rose-400 text-xs mt-2">
+              <div className="flex items-center gap-2 text-[#d91b74] text-xs mt-2">
                 <AlertCircle className="w-4 h-4 shrink-0" />
                 <span className={isBn ? 'font-bengali' : ''}>{message}</span>
               </div>
             )}
 
-            <p className={`text-center text-[11px] text-slate-500 pt-1 ${isBn ? 'font-bengali' : ''}`}>
+            <p className={`text-center text-[11px] text-[#6e6e6e] font-mono pt-1 ${isBn ? 'font-bengali' : ''}`}>
               {isBn
                 ? '১২,০০০+ এআই গবেষক ও প্রকৌশলীর সাথে যুক্ত হোন। যেকোনো সময় ১-ক্লিকে আনসাবস্ক্রাইব করতে পারবেন।'
                 : 'Join 12,000+ AI researchers and engineers. Unsubscribe anytime with 1-click.'}

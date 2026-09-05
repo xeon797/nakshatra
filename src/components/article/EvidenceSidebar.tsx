@@ -24,18 +24,18 @@ function resolveTierBadge(publisher: string, tier?: string, isBn?: boolean) {
     if (tier.includes('1') || tier.includes('primary')) {
       return {
         label: isBn ? 'টায়ার ১ প্রাথমিক' : 'Tier 1 Primary',
-        color: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
+        color: 'bg-[#1e0a3c] text-white border-[#1e0a3c]',
       };
     }
     if (tier.includes('2') || tier.includes('verified')) {
       return {
         label: isBn ? 'টায়ার ২ প্রাতিষ্ঠানিক' : 'Tier 2 Academic',
-        color: 'bg-sky-500/10 text-sky-400 border-sky-500/20',
+        color: 'bg-[#f1ebfc] text-[#7b3fe4] border-[#d9d9d9]',
       };
     }
     return {
       label: isBn ? 'টায়ার ৩ সাংবাদিকতা' : 'Tier 3 Journalism',
-      color: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
+      color: 'bg-[#fdfbe4] text-[#120424] border-[#d9d9d9]',
     };
   }
 
@@ -51,18 +51,18 @@ function resolveTierBadge(publisher: string, tier?: string, isBn?: boolean) {
   ) {
     return {
       label: isBn ? 'টায়ার ১ ল্যাব' : 'Tier 1 Primary Lab',
-      color: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
+      color: 'bg-[#1e0a3c] text-white border-[#1e0a3c]',
     };
   }
   if (lower.includes('arxiv') || lower.includes('paper') || lower.includes('mit')) {
     return {
       label: isBn ? 'টায়ার ২ প্রাতিষ্ঠানিক' : 'Tier 2 Academic',
-      color: 'bg-sky-500/10 text-sky-400 border-sky-500/20',
+      color: 'bg-[#f1ebfc] text-[#7b3fe4] border-[#d9d9d9]',
     };
   }
   return {
     label: isBn ? 'টায়ার ৩ সাংবাদিকতা' : 'Tier 3 Journalism',
-    color: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
+    color: 'bg-[#fdfbe4] text-[#120424] border-[#d9d9d9]',
   };
 }
 
@@ -76,22 +76,23 @@ export function EvidenceSidebar({ citations, confidenceScore }: EvidenceSidebarP
 
   return (
     <aside
-      className={`rounded-2xl bg-slate-900/90 border border-slate-800 p-5 shadow-xl space-y-4 ${
+      className={`bg-[#ffffff] border border-[#d9d9d9] p-5 space-y-4 ${
         isBn ? 'font-bengali' : ''
       }`}
+      style={{ borderRadius: 0 }}
     >
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+      <div className="flex items-center justify-between border-b border-[#d9d9d9] pb-3">
         <div className="flex items-center gap-2">
-          <Bookmark className="w-4 h-4 text-sky-400" />
-          <h3 className="text-sm font-bold text-white uppercase tracking-wider">
+          <Bookmark className="w-4 h-4 text-[#1e0a3c]" />
+          <h3 className="text-xs font-bold text-[#120424] uppercase tracking-wider font-display">
             {t.evidenceDrawerTitle}
           </h3>
         </div>
 
         <button
           onClick={() => setIsOpen(!isOpen)}
-          className="text-slate-400 hover:text-white p-1 rounded transition-colors"
+          className="text-[#6e6e6e] hover:text-[#120424] p-1 transition-colors"
           title={isOpen ? 'Collapse drawer' : 'Expand drawer'}
         >
           {isOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
@@ -99,21 +100,24 @@ export function EvidenceSidebar({ citations, confidenceScore }: EvidenceSidebarP
       </div>
 
       {/* Meta Score */}
-      <div className="flex items-center justify-between text-xs bg-slate-950/60 p-2.5 rounded-lg border border-slate-800/80">
-        <span className="text-slate-400 flex items-center gap-1.5 font-medium">
-          <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+      <div
+        className="flex items-center justify-between text-xs bg-[#f1ebfc] p-2.5 border border-[#d9d9d9]"
+        style={{ borderRadius: 0 }}
+      >
+        <span className="text-[#1e0a3c] flex items-center gap-1.5 font-bold font-mono">
+          <ShieldCheck className="w-3.5 h-3.5 text-[#1e0a3c]" />
           {t.groundingInvariant}
         </span>
-        <span className="text-emerald-400 font-mono font-bold">
+        <span className="text-[#1e0a3c] font-mono font-bold">
           {displayConfidence}% {t.corroborated}
         </span>
       </div>
 
       {/* Citation Cards */}
       {isOpen && (
-        <div className="space-y-3 max-h-[70vh] overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-slate-800">
+        <div className="space-y-3 max-h-[70vh] overflow-y-auto pr-1 scrollbar-thin">
           {citations.length === 0 ? (
-            <p className="text-xs text-slate-500 py-3 text-center">
+            <p className="text-xs text-[#6e6e6e] py-3 text-center">
               {isBn ? 'এই প্রতিবেদনের সাথে কোনো তথ্যপ্রমাণ সংযুক্ত নেই।' : 'No citations bound to this draft.'}
             </p>
           ) : (
@@ -125,27 +129,32 @@ export function EvidenceSidebar({ citations, confidenceScore }: EvidenceSidebarP
                 <div
                   key={c.id}
                   id={`citation-${c.citationIndex}`}
-                  className="p-3 rounded-xl bg-slate-950/80 border border-slate-800/90 space-y-2.5 scroll-mt-24 transition-all hover:border-sky-500/50"
+                  className="p-3 bg-[#fdfcf3] border border-[#d9d9d9] space-y-2.5 scroll-mt-24 transition-colors hover:border-[#120424]"
+                  style={{ borderRadius: 0 }}
                 >
                   <div className="flex items-start justify-between gap-2">
-                    <span className="w-5 h-5 rounded-md bg-sky-500/20 text-sky-400 font-mono text-[11px] font-bold flex items-center justify-center shrink-0">
+                    <span
+                      className="w-5 h-5 bg-[#1e0a3c] text-white font-mono text-[11px] font-bold flex items-center justify-center shrink-0"
+                      style={{ borderRadius: 0 }}
+                    >
                       [{citIndex}]
                     </span>
 
                     <span
-                      className={`text-[10px] font-semibold uppercase px-2 py-0.5 rounded-full border ${tierBadge.color}`}
+                      className={`text-[10px] font-mono font-bold uppercase px-2 py-0.5 border ${tierBadge.color}`}
+                      style={{ borderRadius: 0 }}
                     >
                       {tierBadge.label}
                     </span>
                   </div>
 
                   <div className="space-y-1">
-                    <p className="text-xs font-medium text-slate-200 leading-snug line-clamp-2">
+                    <p className="text-xs font-serif italic text-[#120424] leading-snug line-clamp-2">
                       &ldquo;{c.anchorText}&rdquo;
                     </p>
-                    <p className="text-[11px] font-mono text-slate-400">
+                    <p className="text-[11px] font-mono text-[#6e6e6e]">
                       {isBn ? 'প্রকাশক:' : 'Publisher:'}{' '}
-                      <span className="text-slate-300 font-semibold">{c.sourcePublisher}</span>
+                      <span className="text-[#120424] font-semibold">{c.sourcePublisher}</span>
                     </p>
                   </div>
 
@@ -153,7 +162,7 @@ export function EvidenceSidebar({ citations, confidenceScore }: EvidenceSidebarP
                     href={c.primarySourceUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 text-[11px] font-semibold text-sky-400 hover:text-sky-300 transition-colors"
+                    className="inline-flex items-center gap-1 text-[11px] font-bold text-[#d91b74] hover:underline font-display uppercase tracking-wider transition-colors"
                   >
                     <span>{t.viewPrimaryDoc}</span>
                     <ExternalLink className="w-3 h-3" />
@@ -163,8 +172,8 @@ export function EvidenceSidebar({ citations, confidenceScore }: EvidenceSidebarP
             })
           )}
 
-          <div className="pt-2 text-[10px] text-slate-500 text-center leading-relaxed">
-            <Sparkles className="w-3 h-3 inline mr-1 text-sky-400" />
+          <div className="pt-2 text-[10px] text-[#6e6e6e] text-center leading-relaxed font-mono">
+            <span className="text-[#d91b74] mr-1">✦</span>
             {t.ngramNotice}
           </div>
         </div>

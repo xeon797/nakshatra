@@ -58,6 +58,7 @@ export default async function HomePage() {
     readingTimeMinutes: a.readingTimeMinutes,
     publishedAt: a.publishedAt,
     sources: a.sources,
+    imageUrl: a.imageUrl || a.heroImageUrl || null,
   }));
 
   // 3. Hero Unit Selection: Highest importance score article from past 24h (or fallback)
@@ -87,7 +88,7 @@ export default async function HomePage() {
       : formattedArticles;
 
   return (
-    <div className="space-y-10 pb-16">
+    <div className="space-y-8 pb-16">
       {/* 1. Top Section: Site Branding, Dynamic Date, and Quick Actions */}
       <HomeFeedHeader />
 
@@ -102,17 +103,23 @@ export default async function HomePage() {
       {heroStory ? (
         <HeroStory story={heroStory} />
       ) : (
-        <div className="rounded-2xl border border-dashed border-slate-800 p-12 text-center space-y-4 bg-slate-950/40">
-          <div className="w-12 h-12 rounded-full bg-slate-900 flex items-center justify-center mx-auto text-sky-400">
+        <div
+          className="border border-dashed border-[#d9d9d9] bg-[#ffffff] p-12 text-center space-y-4"
+          style={{ borderRadius: 0 }}
+        >
+          <div className="w-12 h-12 bg-[#fdfbe4] border border-[#d9d9d9] flex items-center justify-center mx-auto text-[#d91b74]">
             <Sparkles className="w-6 h-6" />
           </div>
-          <h3 className="text-xl font-bold text-white">Continuous Autonomous Ingestion Active</h3>
-          <p className="text-sm text-slate-400 max-w-md mx-auto">
+          <h3 className="text-xl font-bold font-display text-[#120424]">
+            Continuous Autonomous Ingestion Active
+          </h3>
+          <p className="text-sm text-[#6e6e6e] max-w-md mx-auto">
             The autonomous newsroom daemon is actively polling Tier 1 labs and arXiv pre-prints. Top breaking stories will appear here as soon as they are synthesized.
           </p>
           <Link
             href="/admin/newsroom"
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-sky-500 text-slate-950 font-bold text-xs hover:bg-sky-400 transition-colors"
+            className="inline-flex items-center gap-2 px-4 py-2 bg-[#1e0a3c] hover:bg-[#120424] text-white font-bold text-xs uppercase tracking-wider font-display transition-colors"
+            style={{ borderRadius: 0 }}
           >
             Open Newsroom Desk &rarr;
           </Link>

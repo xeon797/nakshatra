@@ -25,38 +25,42 @@ export function PulseTicker({
 
   return (
     <div
-      className={`rounded-xl bg-slate-900/80 border border-slate-800/80 px-4 py-3 flex flex-wrap items-center justify-between gap-4 text-xs ${
+      className={`bg-[#ffffff] border border-[#d9d9d9] px-4 py-3 flex flex-wrap items-center justify-between gap-4 text-xs ${
         isBn ? 'font-bengali' : ''
       }`}
+      style={{ borderRadius: 0 }}
     >
       <div className="flex items-center gap-3">
-        <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-emerald-500/10 text-emerald-400 font-mono font-medium border border-emerald-500/20">
-          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-          <Radio className="w-3.5 h-3.5" />
+        <span
+          className="flex items-center gap-1.5 px-2.5 py-1 bg-[#f1ebfc] text-[#1e0a3c] font-mono font-bold text-[11px] border border-[#d9d9d9] uppercase tracking-wider"
+          style={{ borderRadius: 0 }}
+        >
+          <span className="w-2 h-2 bg-[#d91b74] animate-pulse" />
+          <Radio className="w-3.5 h-3.5 text-[#d91b74]" />
           {t.livePulse}
         </span>
-        <span className="text-slate-400 hidden sm:inline">
+        <span className="text-[#6e6e6e] font-mono text-[11px] hidden sm:inline uppercase">
           {t.pulseDaemon}
         </span>
       </div>
 
-      <div className="flex flex-wrap items-center gap-4 sm:gap-6 text-slate-300">
+      <div className="flex flex-wrap items-center gap-4 sm:gap-6 text-[#120424]">
         <div className="flex items-center gap-1.5">
-          <Database className="w-3.5 h-3.5 text-sky-400" />
-          <span className="text-white font-bold font-mono">{displayIngested}</span>
-          <span className="text-slate-400 text-[11px]">{t.storiesIngestedToday}</span>
+          <Database className="w-3.5 h-3.5 text-[#1e0a3c]" />
+          <span className="text-[#120424] font-bold font-mono">{displayIngested}</span>
+          <span className="text-[#6e6e6e] text-[11px] uppercase">{t.storiesIngestedToday}</span>
         </div>
 
         <div className="flex items-center gap-1.5">
-          <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-          <span className="text-white font-bold font-mono">{displaySources}</span>
-          <span className="text-slate-400 text-[11px]">{t.verifiedSourcesActive}</span>
+          <ShieldCheck className="w-3.5 h-3.5 text-[#1e0a3c]" />
+          <span className="text-[#120424] font-bold font-mono">{displaySources}</span>
+          <span className="text-[#6e6e6e] text-[11px] uppercase">{t.verifiedSourcesActive}</span>
         </div>
 
         <div className="flex items-center gap-1.5">
-          <Activity className="w-3.5 h-3.5 text-purple-400" />
-          <span className="text-white font-bold font-mono">{displayPublished}</span>
-          <span className="text-slate-400 text-[11px]">{t.articlesSynthesized}</span>
+          <Activity className="w-3.5 h-3.5 text-[#1e0a3c]" />
+          <span className="text-[#120424] font-bold font-mono">{displayPublished}</span>
+          <span className="text-[#6e6e6e] text-[11px] uppercase">{t.articlesSynthesized}</span>
         </div>
       </div>
     </div>

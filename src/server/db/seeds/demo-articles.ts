@@ -1,4 +1,4 @@
-﻿import { getDb } from '../../../db';
+import { getDb } from '../../../db';
 import * as schema from '../../../db/schema';
 import { eq, sql } from 'drizzle-orm';
 
@@ -123,6 +123,8 @@ export async function seedDemoArticlesIfEmpty(): Promise<void> {
           'কোডিং বেঞ্চমার্ক ও সফটওয়্যার ইঞ্জিনিয়ারিং ওয়ার্কফ্লোতে অভূতপূর্ব অগ্রগতি।',
         ],
         metaDescription: 'Anthropic launches Claude 3.7 Sonnet featuring dynamic hybrid reasoning and token-budget controls.',
+        imageUrl: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=1200&q=80',
+        heroImageUrl: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=1200&q=80',
         status: 'published',
         confidenceScore: '0.99',
         nGramMaxSimilarity: '0.04',
@@ -191,6 +193,8 @@ export async function seedDemoArticlesIfEmpty(): Promise<void> {
           'এফপি৮ মিক্সড-প্রিসিশনে ১৪.৮ ট্রিলিয়ন টোকেনের মাধ্যমে প্রশিক্ষিত।',
         ],
         metaDescription: 'DeepSeek-V3 open model released with 671B parameters and fine-grained expert routing.',
+        imageUrl: 'https://images.unsplash.com/photo-1620712943543-bcc4688e7485?auto=format&fit=crop&w=1200&q=80',
+        heroImageUrl: 'https://images.unsplash.com/photo-1620712943543-bcc4688e7485?auto=format&fit=crop&w=1200&q=80',
         status: 'published',
         confidenceScore: '0.98',
         nGramMaxSimilarity: '0.03',
@@ -252,6 +256,8 @@ export async function seedDemoArticlesIfEmpty(): Promise<void> {
           'মানুষের ঐতিহাসিক প্রমাণের চেয়েও দ্রুত ও সংক্ষিপ্ত সমাধান আবিষ্কার করেছে।',
         ],
         metaDescription: 'AlphaGeometry 2 achieves 83% success rate on IMO Olympiad geometry challenges.',
+        imageUrl: 'https://images.unsplash.com/photo-1635070041078-e363dbe005cb?auto=format&fit=crop&w=1200&q=80',
+        heroImageUrl: 'https://images.unsplash.com/photo-1635070041078-e363dbe005cb?auto=format&fit=crop&w=1200&q=80',
         status: 'published',
         confidenceScore: '0.99',
         nGramMaxSimilarity: '0.03',

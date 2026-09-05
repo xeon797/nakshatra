@@ -27,68 +27,86 @@ export default async function ObservabilityPage() {
   const avgLatency = runs.length > 0 ? Math.round(runs.reduce((sum, r) => sum + r.latencyMs, 0) / runs.length) : 0;
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-8 pb-12">
       {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-          <Activity className="w-6 h-6 text-purple-400" />
+      <div className="border-b border-[#d9d9d9] pb-4">
+        <h1 className="text-2xl font-bold font-display text-[#120424] flex items-center gap-2">
+          <Activity className="w-6 h-6 text-[#1e0a3c]" />
           Autonomous Agent Observability & Telemetry
         </h1>
-        <p className="text-xs text-slate-400 mt-1">
+        <p className="text-xs text-[#6e6e6e] mt-1">
           Full execution traces, token consumption, reasoning steps, and audit logs for all NAKSHATRA agents.
         </p>
       </div>
 
       {/* Metric Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-1">
-          <span className="text-[11px] text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-            <Cpu className="w-3.5 h-3.5 text-sky-400" />
+        <div
+          className="p-4 bg-[#ffffff] border border-[#d9d9d9] space-y-1"
+          style={{ borderRadius: 0 }}
+        >
+          <span className="text-[11px] text-[#6e6e6e] uppercase tracking-wider font-mono flex items-center gap-1.5">
+            <Cpu className="w-3.5 h-3.5 text-[#1e0a3c]" />
             Total Agent Executions
           </span>
-          <div className="text-2xl font-extrabold text-white font-mono">{runs.length}</div>
+          <div className="text-2xl font-black text-[#120424] font-mono">{runs.length}</div>
         </div>
 
-        <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-1">
-          <span className="text-[11px] text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-            <Coins className="w-3.5 h-3.5 text-amber-400" />
+        <div
+          className="p-4 bg-[#ffffff] border border-[#d9d9d9] space-y-1"
+          style={{ borderRadius: 0 }}
+        >
+          <span className="text-[11px] text-[#6e6e6e] uppercase tracking-wider font-mono flex items-center gap-1.5">
+            <Coins className="w-3.5 h-3.5 text-[#1e0a3c]" />
             Prompt / Completion Tokens
           </span>
-          <div className="text-2xl font-extrabold text-white font-mono">
+          <div className="text-2xl font-black text-[#120424] font-mono">
             {totalPromptTokens.toLocaleString()} / {totalCompletionTokens.toLocaleString()}
           </div>
         </div>
 
-        <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-1">
-          <span className="text-[11px] text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-            <Clock className="w-3.5 h-3.5 text-emerald-400" />
+        <div
+          className="p-4 bg-[#ffffff] border border-[#d9d9d9] space-y-1"
+          style={{ borderRadius: 0 }}
+        >
+          <span className="text-[11px] text-[#6e6e6e] uppercase tracking-wider font-mono flex items-center gap-1.5">
+            <Clock className="w-3.5 h-3.5 text-[#1e0a3c]" />
             Average Latency
           </span>
-          <div className="text-2xl font-extrabold text-white font-mono">{avgLatency} ms</div>
+          <div className="text-2xl font-black text-[#120424] font-mono">{avgLatency} ms</div>
         </div>
 
-        <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-1">
-          <span className="text-[11px] text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+        <div
+          className="p-4 bg-[#ffffff] border border-[#d9d9d9] space-y-1"
+          style={{ borderRadius: 0 }}
+        >
+          <span className="text-[11px] text-[#6e6e6e] uppercase tracking-wider font-mono flex items-center gap-1.5">
+            <CheckCircle2 className="w-3.5 h-3.5 text-[#1e0a3c]" />
             Primary AI Architecture
           </span>
-          <div className="text-lg font-bold text-white font-mono">Google Gemini</div>
+          <div className="text-lg font-bold text-[#120424] font-mono">Google Gemini</div>
         </div>
       </div>
 
       {/* Agent Run Traces Table */}
       <section className="space-y-4">
-        <h2 className="text-base font-bold text-white">Live Execution Traces</h2>
+        <h2 className="text-base font-bold font-display text-[#120424]">Live Execution Traces</h2>
 
         {runs.length === 0 ? (
-          <div className="p-8 text-center rounded-xl bg-slate-950/40 border border-slate-800 text-slate-400 text-xs">
+          <div
+            className="p-8 text-center bg-[#ffffff] border border-[#d9d9d9] text-[#6e6e6e] text-xs font-mono"
+            style={{ borderRadius: 0 }}
+          >
             No agent runs logged yet. Execute an autonomous ingestion cycle to view live traces.
           </div>
         ) : (
-          <div className="rounded-xl border border-slate-800 overflow-hidden bg-slate-900/60">
+          <div
+            className="border border-[#d9d9d9] overflow-hidden bg-[#ffffff]"
+            style={{ borderRadius: 0 }}
+          >
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
-                <thead className="bg-slate-950/80 text-slate-400 uppercase text-[10px] tracking-wider border-b border-slate-800">
+                <thead className="bg-[#fdfbe4] text-[#1e0a3c] uppercase text-[10px] tracking-wider border-b border-[#d9d9d9] font-mono font-bold">
                   <tr>
                     <th className="p-3">Agent</th>
                     <th className="p-3">Model</th>
@@ -99,35 +117,36 @@ export default async function ObservabilityPage() {
                     <th className="p-3">Time</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-800/60">
+                <tbody className="divide-y divide-[#d9d9d9]">
                   {runs.map((r) => {
                     const isSuccess = r.status === 'success';
                     return (
-                      <tr key={r.id} className="hover:bg-slate-800/30 transition-colors">
-                        <td className="p-3 font-semibold text-white font-mono">{r.agentName}</td>
-                        <td className="p-3 text-slate-300 font-mono text-[11px]">{r.modelName}</td>
+                      <tr key={r.id} className="hover:bg-[#fdfcf3] transition-colors">
+                        <td className="p-3 font-bold text-[#120424] font-mono">{r.agentName}</td>
+                        <td className="p-3 text-[#6e6e6e] font-mono text-[11px]">{r.modelName}</td>
                         <td className="p-3">
                           <span
-                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                            className={`inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-mono font-bold uppercase tracking-wider border ${
                               isSuccess
-                                ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                                : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
+                                ? 'bg-[#f1ebfc] text-[#1e0a3c] border-[#d9d9d9]'
+                                : 'bg-[#ffffff] text-[#d91b74] border-[#d91b74]'
                             }`}
+                            style={{ borderRadius: 0 }}
                           >
                             {isSuccess ? (
-                              <CheckCircle2 className="w-3 h-3" />
+                              <CheckCircle2 className="w-3 h-3 text-[#1e0a3c]" />
                             ) : (
-                              <XCircle className="w-3 h-3" />
+                              <XCircle className="w-3 h-3 text-[#d91b74]" />
                             )}
                             {r.status}
                           </span>
                         </td>
-                        <td className="p-3 text-slate-300 font-mono">
+                        <td className="p-3 text-[#120424] font-mono">
                           {r.promptTokens} / {r.completionTokens}
                         </td>
-                        <td className="p-3 text-slate-300 font-mono">{r.latencyMs} ms</td>
-                        <td className="p-3 text-slate-300 font-mono">${r.totalCostUsd}</td>
-                        <td className="p-3 text-slate-500 font-mono">
+                        <td className="p-3 text-[#120424] font-mono">{r.latencyMs} ms</td>
+                        <td className="p-3 text-[#120424] font-mono">${r.totalCostUsd}</td>
+                        <td className="p-3 text-[#6e6e6e] font-mono">
                           {new Date(r.createdAt).toLocaleTimeString()}
                         </td>
                       </tr>
@@ -143,31 +162,38 @@ export default async function ObservabilityPage() {
       {/* Step Logs Telemetry */}
       {stepLogs.length > 0 && (
         <section className="space-y-4">
-          <h2 className="text-base font-bold text-white">Recent Reasoning & Action Payloads</h2>
+          <h2 className="text-base font-bold font-display text-[#120424]">Recent Reasoning & Action Payloads</h2>
           <div className="space-y-3">
             {stepLogs.slice(0, 5).map((log) => (
               <div
                 key={log.id}
-                className="p-4 rounded-xl bg-slate-950/70 border border-slate-800 space-y-2 text-xs"
+                className="p-4 bg-[#ffffff] border border-[#d9d9d9] space-y-2 text-xs"
+                style={{ borderRadius: 0 }}
               >
                 <div className="flex items-center justify-between font-mono">
-                  <span className="font-bold text-sky-400">Action: {log.actionName}</span>
-                  <span className="text-slate-500">Step #{log.stepNumber}</span>
+                  <span className="font-bold text-[#1e0a3c]">Action: {log.actionName}</span>
+                  <span className="text-[#6e6e6e]">Step #{log.stepNumber}</span>
                 </div>
                 {log.rationale && (
-                  <p className="text-slate-300 italic">
-                    <span className="text-slate-400 not-italic font-semibold">Rationale: </span>
+                  <p className="text-[#120424] italic font-serif">
+                    <span className="text-[#6e6e6e] not-italic font-sans font-semibold">Rationale: </span>
                     {log.rationale}
                   </p>
                 )}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2 text-[11px] font-mono">
-                  <div className="p-2.5 rounded bg-slate-900 border border-slate-800/80 overflow-x-auto">
-                    <span className="text-slate-400 block mb-1 font-sans font-semibold">Input Payload:</span>
-                    <pre className="text-slate-300">{JSON.stringify(log.inputPayload, null, 2)}</pre>
+                  <div
+                    className="p-2.5 bg-[#fdfcf3] border border-[#d9d9d9] overflow-x-auto"
+                    style={{ borderRadius: 0 }}
+                  >
+                    <span className="text-[#6e6e6e] block mb-1 font-sans font-bold uppercase text-[10px]">Input Payload:</span>
+                    <pre className="text-[#120424]">{JSON.stringify(log.inputPayload, null, 2)}</pre>
                   </div>
-                  <div className="p-2.5 rounded bg-slate-900 border border-slate-800/80 overflow-x-auto">
-                    <span className="text-slate-400 block mb-1 font-sans font-semibold">Output Payload:</span>
-                    <pre className="text-slate-300">{JSON.stringify(log.outputPayload, null, 2)}</pre>
+                  <div
+                    className="p-2.5 bg-[#fdfcf3] border border-[#d9d9d9] overflow-x-auto"
+                    style={{ borderRadius: 0 }}
+                  >
+                    <span className="text-[#6e6e6e] block mb-1 font-sans font-bold uppercase text-[10px]">Output Payload:</span>
+                    <pre className="text-[#120424]">{JSON.stringify(log.outputPayload, null, 2)}</pre>
                   </div>
                 </div>
               </div>

@@ -57,6 +57,80 @@ export function cleanExtractedMarkdown(rawMarkdown: string): string {
 }
 
 /**
+ * Extracts an OpenGraph or Twitter Card image URL from HTML content.
+ * Validates that the URL begins with https://.
+ */
+export function extractOpenGraphImageFromHtml(html: string): string | null {
+  if (!html) return null;
+
+  // 1. Check meta[property="og:image"]
+  const ogMatch =
+    html.match(/<meta[^>]+(?:property|name)=["'](?:og:image|twitter:image)["'][^>]+content=["'](https:\/\/[^"']+)["']/i) ||
+    html.match(/<meta[^>]+content=["'](https:\/\/[^"']+)["'][^>]+(?:property|name)=["'](?:og:image|twitter:image)["']/i);
+
+  if (ogMatch && ogMatch[1]) {
+    const url = ogMatch[1].trim();
+    if (url.startsWith('https://')) {
+      return url;
+    }
+  }
+
+  // 2. Check for standard <img> tags with absolute https URL
+  const imgMatch = html.match(/<img[^>]+src=["'](https:\/\/[^"']+)["']/i);
+  if (imgMatch && imgMatch[1]) {
+    const url = imgMatch[1].trim();
+    if (
+      url.startsWith('https://') &&
+      !url.includes('tracking') &&
+      !url.includes('pixel') &&
+      !url.includes('spacer')
+    ) {
+      return url;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Fetches page HTML and extracts OpenGraph image (og:image or twitter:image).
+ */
+export async function fetchOpenGraphImage(
+  url: string,
+  fetchFn: typeof fetch = fetch
+): Promise<string | null> {
+  if (!url || !url.startsWith('https://')) return null;
+
+  const isTest = process.env.NODE_ENV === 'test' && !process.env.TEST_LIVE_EXTERNAL;
+  if (isTest && fetchFn === fetch) {
+    return null;
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 4000);
+
+  try {
+    const res = await fetchFn(url, {
+      method: 'GET',
+      headers: {
+        'User-Agent': 'NAKSHATRA-OpenGraph-Bot/1.0 (+https://nakshatra.ai)',
+        Accept: 'text/html,application/xhtml+xml',
+      },
+      signal: controller.signal,
+    });
+
+    if (!res.ok) return null;
+
+    const html = await res.text();
+    return extractOpenGraphImageFromHtml(html);
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
  * Extracts clean, full-text markdown from a URL using Jina Reader (https://r.jina.ai/).
  * Gracefully falls back to fallbackText on timeout, network error, or HTTP error.
  */

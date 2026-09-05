@@ -12,6 +12,7 @@ export interface ParsedFeedItem {
   publishedAt: Date;
   contentHash: string;
   simhashFingerprint: bigint;
+  imageUrl?: string | null;
 }
 
 export class RssFeedAdapter {
@@ -75,6 +76,53 @@ export class RssFeedAdapter {
         }
       }
 
+      // Extract thumbnail from enclosure, media tags, or HTML content
+      let imageUrl: string | null = null;
+      if (item.enclosure?.url && typeof item.enclosure.url === 'string') {
+        const u = item.enclosure.url.trim();
+        if (u.startsWith('https://')) {
+          imageUrl = u;
+        }
+      }
+
+      if (!imageUrl && itemAny['media:content']) {
+        const mc = itemAny['media:content'];
+        const mUrl = mc?.$?.url || mc?.url || (Array.isArray(mc) ? mc[0]?.$?.url || mc[0]?.url : null);
+        if (typeof mUrl === 'string' && mUrl.trim().startsWith('https://')) {
+          imageUrl = mUrl.trim();
+        }
+      }
+
+      if (!imageUrl && itemAny['media:thumbnail']) {
+        const mt = itemAny['media:thumbnail'];
+        const tUrl = mt?.$?.url || mt?.url || (Array.isArray(mt) ? mt[0]?.$?.url || mt[0]?.url : null);
+        if (typeof tUrl === 'string' && tUrl.trim().startsWith('https://')) {
+          imageUrl = tUrl.trim();
+        }
+      }
+
+      if (!imageUrl && rawHtml) {
+        const ogMatch =
+          rawHtml.match(/<meta[^>]+(?:property|name)=["'](?:og:image|twitter:image)["'][^>]+content=["'](https:\/\/[^"']+)["']/i) ||
+          rawHtml.match(/<meta[^>]+content=["'](https:\/\/[^"']+)["'][^>]+(?:property|name)=["'](?:og:image|twitter:image)["']/i);
+        if (ogMatch && ogMatch[1]) {
+          imageUrl = ogMatch[1].trim();
+        } else {
+          const imgMatch = rawHtml.match(/<img[^>]+src=["'](https:\/\/[^"']+)["']/i);
+          if (imgMatch && imgMatch[1]) {
+            const candidate = imgMatch[1].trim();
+            if (
+              !candidate.includes('pixel') &&
+              !candidate.includes('tracking') &&
+              !candidate.includes('spacer') &&
+              candidate.startsWith('https://')
+            ) {
+              imageUrl = candidate;
+            }
+          }
+        }
+      }
+
       results.push({
         canonicalUrl,
         title,
@@ -85,6 +133,7 @@ export class RssFeedAdapter {
         publishedAt,
         contentHash,
         simhashFingerprint,
+        imageUrl,
       });
     }
 

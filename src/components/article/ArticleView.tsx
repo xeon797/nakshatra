@@ -2,6 +2,7 @@
 
 import React from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import {
   ShieldCheck,
   Clock,
@@ -14,6 +15,7 @@ import {
 import { useLanguage } from '../../context/language-context';
 import { toBengaliDigits, formatReadingTime } from '../../lib/i18n';
 import { EvidenceSidebar, CitationItem } from './EvidenceSidebar';
+import { BroadsheetImagePlaceholder } from '../brand/BroadsheetImagePlaceholder';
 
 export interface ArticleViewData {
   id: string;
@@ -21,6 +23,8 @@ export interface ArticleViewData {
   slug: string;
   deck: string;
   contentMarkdown: string;
+  imageUrl?: string | null;
+  heroImageUrl?: string | null;
   titleEn?: string | null;
   titleBn?: string | null;
   summaryEn?: string | null;
@@ -68,7 +72,7 @@ function renderParagraphWithCitations(paragraph: string, isBn: boolean) {
         <sup key={index} id={`ref-${citNum}`} className="scroll-mt-24">
           <a
             href={`#citation-${citNum}`}
-            className="text-sky-400 hover:text-sky-300 font-mono text-xs font-bold px-1 py-0.5 rounded bg-sky-500/10 hover:bg-sky-500/20 border border-sky-500/20 mx-0.5 transition-colors"
+            className="text-[#d91b74] hover:text-[#bf1363] font-mono text-xs font-bold px-1 py-0.5 bg-[#fdfcf3] border border-[#d9d9d9] mx-0.5 transition-colors"
             title={isBn ? `যাচাইকৃত সূত্র [${displayNum}] দেখুন` : `Jump to verified source citation [${citNum}]`}
           >
             [{displayNum}]
@@ -139,17 +143,17 @@ export function ArticleView({ article }: ArticleViewProps) {
   const getCategoryLabel = (cat: string) => {
     switch (cat) {
       case 'llm_release':
-        return { label: t.modelsCategory, color: 'bg-sky-500/10 text-sky-400 border-sky-500/30' };
+        return { label: t.modelsCategory, color: 'bg-[#f1ebfc] text-[#1e0a3c] border-[#d9d9d9]' };
       case 'agentic':
-        return { label: t.agentsCategory, color: 'bg-purple-500/10 text-purple-400 border-purple-500/30' };
+        return { label: t.agentsCategory, color: 'bg-[#f1ebfc] text-[#1e0a3c] border-[#d9d9d9]' };
       case 'infra':
-        return { label: t.infraCategory, color: 'bg-amber-500/10 text-amber-400 border-amber-500/30' };
+        return { label: t.infraCategory, color: 'bg-[#fdfbe4] text-[#120424] border-[#d9d9d9]' };
       case 'research':
-        return { label: t.researchCategory, color: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' };
+        return { label: t.researchCategory, color: 'bg-[#f1ebfc] text-[#7b3fe4] border-[#d9d9d9]' };
       case 'policy':
-        return { label: t.policyCategory, color: 'bg-rose-500/10 text-rose-400 border-rose-500/30' };
+        return { label: t.policyCategory, color: 'bg-[#fdfbe4] text-[#120424] border-[#d9d9d9]' };
       default:
-        return { label: isBn ? 'এআই সংবাদ' : 'AI Intelligence', color: 'bg-slate-800 text-slate-300 border-slate-700' };
+        return { label: isBn ? 'এআই সংবাদ' : 'AI Intelligence', color: 'bg-[#ffffff] text-[#120424] border-[#d9d9d9]' };
     }
   };
   const categoryBadge = getCategoryLabel(categoryKey);
@@ -170,17 +174,17 @@ export function ArticleView({ article }: ArticleViewProps) {
     sourceTier: article.storySources?.find((s) => s.name === c.sourcePublisher)?.tier,
   }));
 
+  const articleImageUrl = article.imageUrl || article.heroImageUrl;
+
   return (
-    <div className="max-w-7xl mx-auto pb-20 space-y-8">
+    <div className="max-w-[1240px] mx-auto pb-20 space-y-8">
       {/* Back Link */}
       <div>
         <Link
           href="/"
-          className={`inline-flex items-center gap-2 text-xs font-bold text-slate-400 hover:text-sky-400 transition-colors uppercase tracking-wider ${
-            isBn ? 'font-bengali' : 'font-mono'
-          }`}
+          className={`inline-flex items-center gap-2 text-xs font-bold text-[#6e6e6e] hover:text-[#120424] transition-colors uppercase tracking-wider font-display`}
         >
-          <ArrowLeft className="w-4 h-4" />
+          <ArrowLeft className="w-4 h-4 text-[#1e0a3c]" />
           <span>{t.backToFeed}</span>
         </Link>
       </div>
@@ -190,30 +194,31 @@ export function ArticleView({ article }: ArticleViewProps) {
         {/* Left Column: Article Body & Header */}
         <article className="lg:col-span-8 space-y-8">
           {/* Story Header */}
-          <header className="space-y-4 border-b border-slate-800 pb-8">
+          <header className="space-y-4 border-b border-[#d9d9d9] pb-6">
             <div className="flex flex-wrap items-center gap-2 sm:gap-3 text-xs">
               <span
-                className={`px-3 py-1 rounded-full border font-bold uppercase tracking-wider text-[11px] ${
+                className={`px-2.5 py-0.5 border font-mono font-bold uppercase tracking-wider text-[11px] ${
                   isBn ? 'font-bengali' : ''
                 } ${categoryBadge.color}`}
+                style={{ borderRadius: 0 }}
               >
                 {categoryBadge.label}
               </span>
 
-              <span className="text-slate-400 text-[11px] flex items-center gap-1 font-mono">
-                <Clock className="w-3.5 h-3.5" />
+              <span className="text-[#6e6e6e] text-[11px] flex items-center gap-1 font-mono">
+                <Clock className="w-3.5 h-3.5 text-[#6e6e6e]" />
                 <span className={isBn ? 'font-bengali' : ''}>{readingTimeStr}</span>
               </span>
 
-              <span className="text-slate-500 text-[11px]">&bull;</span>
+              <span className="text-[#d9d9d9] text-[11px]">&bull;</span>
 
-              <span className={`text-slate-400 text-[11px] ${isBn ? 'font-bengali' : 'font-mono'}`}>
+              <span className={`text-[#6e6e6e] text-[11px] ${isBn ? 'font-bengali' : 'font-mono'}`}>
                 {formattedDate}
               </span>
             </div>
 
             <h1
-              className={`text-3xl sm:text-5xl font-black text-white tracking-tight ${
+              className={`text-3xl sm:text-4xl md:text-5xl font-black text-[#120424] tracking-tight ${
                 isBn ? 'font-bengali leading-[1.3]' : 'font-display leading-tight'
               }`}
             >
@@ -221,7 +226,7 @@ export function ArticleView({ article }: ArticleViewProps) {
             </h1>
 
             <p
-              className={`text-lg sm:text-xl text-slate-300 font-normal ${
+              className={`text-lg sm:text-xl text-[#6e6e6e] font-normal ${
                 isBn ? 'font-bengali leading-[1.75]' : 'leading-relaxed'
               }`}
             >
@@ -229,35 +234,63 @@ export function ArticleView({ article }: ArticleViewProps) {
             </p>
 
             {/* Author / Agent Signature */}
-            <div className="pt-3 flex items-center gap-3">
-              <div className="w-8 h-8 rounded-lg bg-sky-500/10 border border-sky-500/30 flex items-center justify-center text-sky-400">
+            <div className="pt-2 flex items-center gap-3">
+              <div
+                className="w-8 h-8 bg-[#f1ebfc] border border-[#d9d9d9] flex items-center justify-center text-[#1e0a3c]"
+                style={{ borderRadius: 0 }}
+              >
                 <Bot className="w-4 h-4" />
               </div>
               <div>
-                <div className={`text-xs font-bold text-white flex items-center gap-1.5 ${isBn ? 'font-bengali' : ''}`}>
+                <div className={`text-xs font-bold text-[#120424] flex items-center gap-1.5 ${isBn ? 'font-bengali' : 'font-display'}`}>
                   <span>{t.synthesizedBy}</span>
-                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                  <ShieldCheck className="w-3.5 h-3.5 text-[#1e0a3c]" />
                 </div>
-                <div className={`text-[11px] text-slate-400 ${isBn ? 'font-bengali' : 'font-mono'}`}>
+                <div className={`text-[11px] text-[#6e6e6e] ${isBn ? 'font-bengali' : 'font-mono'}`}>
                   {t.autonomousVerification}
                 </div>
               </div>
             </div>
           </header>
 
+          {/* Lead Article Image / Broadsheet Placeholder */}
+          <div
+            className="relative w-full aspect-[16/9] border border-[#d9d9d9] overflow-hidden bg-[#fdfbe4]"
+            style={{ borderRadius: 0 }}
+          >
+            {articleImageUrl ? (
+              <Image
+                src={articleImageUrl}
+                alt={title}
+                fill
+                unoptimized
+                className="object-cover"
+              />
+            ) : (
+              <BroadsheetImagePlaceholder
+                category={categoryBadge.label.toUpperCase()}
+                headline={title}
+                aspectRatio="16/9"
+              />
+            )}
+          </div>
+
           {/* Automated Executive Summary / Key Takeaways Callout Box */}
           {keyTakeaways.length > 0 && (
-            <section className="rounded-2xl bg-gradient-to-br from-slate-900 via-slate-900/90 to-sky-950/20 border-l-4 border-l-sky-500 border-y border-r border-slate-800 p-6 space-y-3 shadow-md">
+            <section
+              className="bg-[#fdfbe4] border border-[#d9d9d9] border-l-4 border-l-[#1e0a3c] p-6 space-y-3"
+              style={{ borderRadius: 0 }}
+            >
               <div className="flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 text-sky-400" />
-                <h2 className={`text-sm font-bold text-white uppercase tracking-wider ${isBn ? 'font-bengali' : ''}`}>
+                <CheckCircle2 className="w-4 h-4 text-[#1e0a3c]" />
+                <h2 className={`text-xs font-bold text-[#1e0a3c] uppercase tracking-wider font-display ${isBn ? 'font-bengali' : ''}`}>
                   {t.executiveSummary}
                 </h2>
               </div>
-              <ul className="space-y-2 text-sm text-slate-300">
+              <ul className="space-y-2 text-sm text-[#120424]">
                 {keyTakeaways.map((takeaway, i) => (
                   <li key={i} className="flex items-start gap-2.5">
-                    <span className="w-1.5 h-1.5 rounded-full bg-sky-400 mt-2 shrink-0" />
+                    <span className="w-1.5 h-1.5 bg-[#d91b74] mt-2 shrink-0" />
                     <span className={isBn ? 'font-bengali leading-[1.75]' : 'leading-relaxed'}>
                       {takeaway}
                     </span>
@@ -268,11 +301,11 @@ export function ArticleView({ article }: ArticleViewProps) {
           )}
 
           {/* Article Main Text */}
-          <div className="prose prose-invert max-w-none text-slate-200 text-base sm:text-lg space-y-6">
+          <div className="max-w-none text-[#120424] text-base sm:text-lg space-y-6">
             {paragraphs.map((p, idx) => (
               <p
                 key={idx}
-                className={isBn ? 'font-bengali leading-[1.85]' : 'leading-relaxed'}
+                className={isBn ? 'font-bengali leading-[1.85]' : 'leading-relaxed text-[#120424]'}
               >
                 {renderParagraphWithCitations(p, isBn)}
               </p>
@@ -281,34 +314,41 @@ export function ArticleView({ article }: ArticleViewProps) {
 
           {/* Multi-Perspective & Differing Viewpoints Section */}
           {secondarySources.length > 0 && (
-            <section className="mt-8 rounded-2xl bg-slate-900/70 border border-slate-800 p-6 space-y-4">
-              <div className="flex items-center gap-2 text-purple-400 border-b border-slate-800 pb-3">
+            <section
+              className="mt-8 bg-[#ffffff] border border-[#d9d9d9] p-6 space-y-4"
+              style={{ borderRadius: 0 }}
+            >
+              <div className="flex items-center gap-2 text-[#1e0a3c] border-b border-[#d9d9d9] pb-3">
                 <GitBranch className="w-4 h-4" />
-                <h3 className={`text-sm font-bold uppercase tracking-wider text-white ${isBn ? 'font-bengali' : ''}`}>
+                <h3 className={`text-xs font-bold uppercase tracking-wider font-display text-[#120424] ${isBn ? 'font-bengali' : ''}`}>
                   {t.multiPerspectiveTitle}
                 </h3>
               </div>
-              <p className={`text-xs text-slate-400 ${isBn ? 'font-bengali leading-[1.7]' : 'leading-relaxed'}`}>
+              <p className={`text-xs text-[#6e6e6e] ${isBn ? 'font-bengali leading-[1.7]' : 'leading-relaxed'}`}>
                 {t.multiPerspectiveSubtitle}
               </p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
                 {secondarySources.map((sec, idx) => (
                   <div
                     key={idx}
-                    className="p-3.5 rounded-xl bg-slate-950/80 border border-slate-800 space-y-1.5"
+                    className="p-3.5 bg-[#fdfcf3] border border-[#d9d9d9] space-y-1.5"
+                    style={{ borderRadius: 0 }}
                   >
                     <div className="flex items-center justify-between text-xs">
-                      <span className="font-semibold text-slate-300 font-mono">{sec.name}</span>
-                      <span className="text-[10px] px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20 font-medium uppercase">
+                      <span className="font-bold text-[#120424] font-mono">{sec.name}</span>
+                      <span
+                        className="text-[10px] px-2 py-0.5 bg-[#f1ebfc] text-[#1e0a3c] border border-[#d9d9d9] font-mono font-medium uppercase"
+                        style={{ borderRadius: 0 }}
+                      >
                         {sec.tier?.replace(/_/g, ' ') || 'Journalism'}
                       </span>
                     </div>
-                    <p className="text-xs text-slate-400 line-clamp-2">{sec.title}</p>
+                    <p className="text-xs text-[#6e6e6e] line-clamp-2">{sec.title}</p>
                     <a
                       href={sec.url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className={`inline-flex items-center gap-1 text-[11px] text-sky-400 hover:text-sky-300 font-medium ${
+                      className={`inline-flex items-center gap-1 text-[11px] font-bold text-[#d91b74] hover:underline font-display uppercase tracking-wider ${
                         isBn ? 'font-bengali' : ''
                       }`}
                     >
@@ -322,9 +362,9 @@ export function ArticleView({ article }: ArticleViewProps) {
           )}
 
           {/* Invariant Attestation Footer */}
-          <div className="pt-6 border-t border-slate-800/80 flex items-center justify-between text-xs text-slate-500">
+          <div className="pt-6 border-t border-[#d9d9d9] flex items-center justify-between text-xs text-[#6e6e6e]">
             <span className={`flex items-center gap-1.5 ${isBn ? 'font-bengali' : 'font-mono'}`}>
-              <ShieldCheck className="w-4 h-4 text-emerald-400" />
+              <ShieldCheck className="w-4 h-4 text-[#1e0a3c]" />
               {isBn ? 'এলএলএম বিভ্রান্তি ছাড়া তথ্য যাচাইকৃত' : 'Verified without LLM hallucination'}
             </span>
             <span className={isBn ? 'font-bengali' : 'font-mono'}>
