@@ -5,7 +5,7 @@ import { isNearDuplicate } from './dedup';
 import { eq, desc, or, inArray } from 'drizzle-orm';
 
 export const DEFAULT_RECENT_FEED_WINDOW = 50;
-export const DEFAULT_OVERLAP_WINDOW_HOURS = 48;
+export const DEFAULT_OVERLAP_WINDOW_HOURS = 72;
 
 export interface IngestSourceOptions {
   xmlOverride?: string;
@@ -65,7 +65,32 @@ export class IngestionService {
         items = await this.rssAdapter.parseUrl(source.baseUrl);
       }
     } catch (err) {
-      result.errors.push(err instanceof Error ? err.message : String(err));
+      const errMsg = err instanceof Error ? err.message : String(err);
+      result.errors.push(errMsg);
+      console.warn(`[Ingestion] Failed polling source "${source.name}" (${source.baseUrl}): ${errMsg}`);
+
+      // Record visible failure status on source record so broken feeds never silently appear healthy
+      try {
+        const rules = (source.scrapeRulesJson as Record<string, unknown>) || {};
+        const consecutiveFailures = (typeof rules.consecutiveFailures === 'number' ? rules.consecutiveFailures : 0) + 1;
+        await db
+          .update(schema.sources)
+          .set({
+            lastPolledAt: new Date(),
+            updatedAt: new Date(),
+            scrapeRulesJson: {
+              ...rules,
+              healthStatus: 'failing',
+              lastError: errMsg,
+              lastErrorAt: new Date().toISOString(),
+              consecutiveFailures,
+            },
+          })
+          .where(eq(schema.sources.id, source.id));
+      } catch (dbErr) {
+        console.error(`[Ingestion] Failed to update failure status for source ${source.id}:`, dbErr);
+      }
+
       return result;
     }
 
@@ -79,7 +104,7 @@ export class IngestionService {
     // 3. To avoid naive timestamp-only filtering (which can miss delayed, out-of-order, or timezone-skewed entries),
     //    we ALWAYS include:
     //    a) All items within the top windowLimit (first 50 items) regardless of timestamp.
-    //    b) Any items beyond the window whose publishedAt falls within the generous overlap window (last 48h).
+    //    b) Any items beyond the window whose publishedAt falls within the generous overlap window (last 72h).
     // 4. Deep historical items beyond the window from weeks or years ago are safely skipped.
     // ─────────────────────────────────────────────────────────────────────────
     const now = Date.now();
@@ -102,9 +127,22 @@ export class IngestionService {
     result.candidatesInspected = candidateItems.length;
 
     if (candidateItems.length === 0) {
+      const rules = (source.scrapeRulesJson as Record<string, unknown>) || {};
       await db
         .update(schema.sources)
-        .set({ lastPolledAt: new Date(), updatedAt: new Date() })
+        .set({
+          lastPolledAt: new Date(),
+          updatedAt: new Date(),
+          scrapeRulesJson: {
+            ...rules,
+            healthStatus: 'healthy',
+            lastSuccessAt: new Date().toISOString(),
+            lastError: null,
+            consecutiveFailures: 0,
+            lastItemsDiscovered: items.length,
+            lastItemsInserted: 0,
+          },
+        })
         .where(eq(schema.sources.id, source.id));
       return result;
     }
@@ -223,10 +261,23 @@ export class IngestionService {
       }
     }
 
-    // Update source's last_polled_at timestamp
+    // Update source's last_polled_at timestamp and record health status
+    const rules = (source.scrapeRulesJson as Record<string, unknown>) || {};
     await db
       .update(schema.sources)
-      .set({ lastPolledAt: new Date(), updatedAt: new Date() })
+      .set({
+        lastPolledAt: new Date(),
+        updatedAt: new Date(),
+        scrapeRulesJson: {
+          ...rules,
+          healthStatus: 'healthy',
+          lastSuccessAt: new Date().toISOString(),
+          lastError: null,
+          consecutiveFailures: 0,
+          lastItemsDiscovered: items.length,
+          lastItemsInserted: result.insertedCount,
+        },
+      })
       .where(eq(schema.sources.id, source.id));
 
     return result;

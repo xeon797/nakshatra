@@ -35,10 +35,17 @@ function extractMediaUrl(media: unknown): string | null {
   return null;
 }
 
+export function sanitizeXmlEntities(xml: string): string {
+  // Replace unescaped ampersands not part of a valid XML entity reference
+  return xml.replace(/&(?!(?:amp|lt|gt|quot|apos|#\d+|#x[0-9a-fA-F]+);)/g, '&amp;');
+}
+
 export class RssFeedAdapter {
   private parser: Parser;
+  private timeoutMs: number;
 
   constructor(timeoutMs = 15000) {
+    this.timeoutMs = timeoutMs;
     this.parser = new Parser({
       timeout: timeoutMs,
       headers: {
@@ -50,8 +57,27 @@ export class RssFeedAdapter {
 
   async parseUrl(feedUrl: string): Promise<ParsedFeedItem[]> {
     try {
-      const feed = await this.parser.parseURL(feedUrl);
-      return this.transformFeedItems(feed.items);
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+      let res: Response;
+      try {
+        res = await fetch(feedUrl, {
+          signal: controller.signal,
+          headers: {
+            'User-Agent': 'NAKSHATRA-AI-News-Bot/1.0 (+https://nakshatra.ai/bot)',
+            Accept: 'application/rss+xml, application/atom+xml, application/xml, text/xml, */*',
+          },
+        });
+      } finally {
+        clearTimeout(timeout);
+      }
+
+      if (!res.ok) {
+        throw new Error(`Status code ${res.status}`);
+      }
+
+      const rawText = await res.text();
+      return await this.parseString(rawText);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       throw new Error(`Failed to parse RSS feed from ${feedUrl}: ${message}`);
@@ -60,7 +86,8 @@ export class RssFeedAdapter {
 
   async parseString(xmlContent: string): Promise<ParsedFeedItem[]> {
     try {
-      const feed = await this.parser.parseString(xmlContent);
+      const sanitized = sanitizeXmlEntities(xmlContent);
+      const feed = await this.parser.parseString(sanitized);
       return this.transformFeedItems(feed.items);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -72,8 +99,8 @@ export class RssFeedAdapter {
     const results: ParsedFeedItem[] = [];
 
     for (const item of items) {
-      const link = item.link || item.guid;
-      if (!link) continue;
+      const link = item.link || item.guid || (item as Record<string, unknown>).id as string;
+      if (!link || typeof link !== 'string' || !link.startsWith('http')) continue;
 
       const canonicalUrl = canonicalizeUrl(link);
       const title = (item.title || 'Untitled Update').trim();
@@ -92,8 +119,14 @@ export class RssFeedAdapter {
       if (typeof itemRecord.author === 'string') authors.push(itemRecord.author);
 
       let publishedAt = new Date();
-      if (item.pubDate) {
-        const parsed = new Date(item.pubDate);
+      const dateStr =
+        item.isoDate ||
+        item.pubDate ||
+        (itemRecord.published as string) ||
+        (itemRecord.updated as string) ||
+        (itemRecord['dc:date'] as string);
+      if (dateStr) {
+        const parsed = new Date(dateStr);
         if (!isNaN(parsed.getTime())) {
           publishedAt = parsed;
         }

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { getDb } from '../../db';
 import * as schema from '../../db/schema';
-import { eq, desc, gte } from 'drizzle-orm';
+import { eq, desc, gte, or } from 'drizzle-orm';
 import { AiModelProvider } from '../../services/ai/provider';
 import { getAiProvider } from '../../services/ai/factory';
 import { AgentAuditLogger } from '../../services/research/audit-logger';
@@ -255,11 +255,11 @@ export class HybridStoryClusteringAgent {
   }
 
   /**
-   * Fetches unclustered raw articles from the candidate window (default: last 36 hours)
+   * Fetches unclustered raw articles from the candidate window (default: last 72 hours for live ingestion, <= 0 for all)
    */
-  async fetchUnclusteredArticles(windowHours = 36): Promise<RawArticleForClustering[]> {
+  async fetchUnclusteredArticles(windowHours = 72): Promise<RawArticleForClustering[]> {
     const db = await getDb();
-    const cutoffDate = new Date(Date.now() - windowHours * 60 * 60 * 1000);
+    const cutoffDate = windowHours > 0 ? new Date(Date.now() - windowHours * 60 * 60 * 1000) : null;
 
     // Fetch existing linked raw article IDs from story_sources
     const linkedRows = await db
@@ -269,7 +269,7 @@ export class HybridStoryClusteringAgent {
     const linkedSet = new Set(linkedRows.map((r) => r.rawArticleId));
 
     // Fetch candidate raw articles with source tier metadata
-    const candidates = await db
+    const query = db
       .select({
         id: schema.rawArticles.id,
         sourceId: schema.rawArticles.sourceId,
@@ -283,9 +283,18 @@ export class HybridStoryClusteringAgent {
         canonicalUrl: schema.rawArticles.canonicalUrl,
       })
       .from(schema.rawArticles)
-      .innerJoin(schema.sources, eq(schema.rawArticles.sourceId, schema.sources.id))
-      .where(gte(schema.rawArticles.createdAt, cutoffDate))
-      .orderBy(desc(schema.rawArticles.createdAt));
+      .innerJoin(schema.sources, eq(schema.rawArticles.sourceId, schema.sources.id));
+
+    const candidates = cutoffDate
+      ? await query
+          .where(
+            or(
+              gte(schema.rawArticles.createdAt, cutoffDate),
+              gte(schema.rawArticles.publishedAt, cutoffDate)
+            )
+          )
+          .orderBy(desc(schema.rawArticles.createdAt))
+      : await query.orderBy(desc(schema.rawArticles.createdAt));
 
     return candidates
       .filter((c) => !linkedSet.has(c.id))
@@ -520,7 +529,7 @@ Excerpt: ${c.summaryExcerpt || c.cleanText.substring(0, 300)}...`
   /**
    * Executes the full clustering pipeline across all unclustered articles in the candidate window
    */
-  async runClusteringPipeline(windowHours = 36): Promise<ClusteredStoryResult[]> {
+  async runClusteringPipeline(windowHours = 72): Promise<ClusteredStoryResult[]> {
     const unclustered = await this.fetchUnclusteredArticles(windowHours);
     if (unclustered.length === 0) {
       return [];
@@ -542,7 +551,7 @@ Excerpt: ${c.summaryExcerpt || c.cleanText.substring(0, 300)}...`
   /**
    * Alias for runClusteringPipeline matching Module 5 interface: Clusterer.processUnclustered()
    */
-  async processUnclustered(windowHours = 36): Promise<ClusteredStoryResult[]> {
+  async processUnclustered(windowHours = 72): Promise<ClusteredStoryResult[]> {
     return this.runClusteringPipeline(windowHours);
   }
 }

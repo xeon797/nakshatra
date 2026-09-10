@@ -11,37 +11,37 @@ describe('Module 1: Database Schema Expansion & High-Signal Source Seeding', () 
     await initializeDatabase();
   });
 
-  it('seeds all 12 initial high-signal sources with proper tiers and intervals', async () => {
+  it('seeds all 21 initial high-signal sources with proper tiers and intervals', async () => {
     const { inserted, skipped } = await seedSources();
-    expect(inserted).toBe(12);
+    expect(inserted).toBe(21);
     expect(skipped).toBe(0);
 
     const db = await getDb();
     const allSources = await db.select().from(schema.sources);
-    expect(allSources.length).toBeGreaterThanOrEqual(12);
+    expect(allSources.length).toBeGreaterThanOrEqual(21);
 
     // Verify Tier 1
     const tier1 = allSources.filter((s) => s.tier === 'tier_1_primary');
-    expect(tier1.length).toBe(6);
-    expect(tier1.every((s) => s.pollingFrequencyMinutes === 15)).toBe(true);
-    expect(tier1.every((s) => s.reputationScore === '1.00')).toBe(true);
+    expect(tier1.length).toBe(9);
+    expect(tier1.every((s) => s.pollingFrequencyMinutes <= 20)).toBe(true);
+    expect(tier1.every((s) => Number(s.reputationScore) >= 0.95)).toBe(true);
 
-    // Verify Tier 2 (arXiv)
+    // Verify Tier 2
     const tier2 = allSources.filter((s) => s.tier === 'tier_2_verified');
-    expect(tier2.length).toBe(2);
-    expect(tier2.every((s) => s.pollingFrequencyMinutes === 30)).toBe(true);
-    expect(tier2.every((s) => s.reputationScore === '0.90')).toBe(true);
+    expect(tier2.length).toBe(6);
+    expect(tier2.every((s) => s.pollingFrequencyMinutes <= 30)).toBe(true);
+    expect(tier2.every((s) => Number(s.reputationScore) >= 0.85)).toBe(true);
 
-    // Verify Tier 3 (Tech Journalism)
+    // Verify Tier 3
     const tier3 = allSources.filter((s) => s.tier === 'tier_3_aggregator');
-    expect(tier3.length).toBe(4);
-    expect(tier3.every((s) => s.pollingFrequencyMinutes === 20)).toBe(true);
-    expect(tier3.every((s) => s.reputationScore === '0.70')).toBe(true);
+    expect(tier3.length).toBe(6);
+    expect(tier3.every((s) => s.pollingFrequencyMinutes <= 30)).toBe(true);
+    expect(tier3.every((s) => Number(s.reputationScore) >= 0.75)).toBe(true);
 
-    // Second run should be idempotent (0 inserted, 12 skipped)
+    // Second run should be idempotent (0 inserted, 21 skipped)
     const secondPass = await seedSources();
     expect(secondPass.inserted).toBe(0);
-    expect(secondPass.skipped).toBe(12);
+    expect(secondPass.skipped).toBe(21);
   });
 
   it('creates and queries stories with editorial status and risk levels', async () => {

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterEach } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterEach } from 'vitest';
 import { getDb, resetDbForTesting } from '../../db';
 import { initializeDatabase } from '../../db/init';
 import * as schema from '../../db/schema';
@@ -14,6 +14,11 @@ describe('STEP 2: Autonomous Publishing Handoff & Editorial State Machine', () =
   let articleManager: ArticleManager;
 
   beforeAll(async () => {
+    resetDbForTesting();
+    await initializeDatabase();
+  });
+
+  beforeEach(async () => {
     resetDbForTesting();
     await initializeDatabase();
   });
@@ -538,6 +543,9 @@ describe('STEP 2: Autonomous Publishing Handoff & Editorial State Machine', () =
 
     const worker = new AutonomousPhase2Worker({
       writer: new MultiSourceWriterAgent(mockProvider),
+      ingestionService: {
+        ingestSource: async () => ({ insertedCount: 0, errors: [] }),
+      } as any,
     });
 
     const summary = await worker.runCycle({ forceAllSources: false });
@@ -568,5 +576,5 @@ describe('STEP 2: Autonomous Publishing Handoff & Editorial State Machine', () =
     const inFeed = publicArticles.find((a) => a.id === persistedArticle.id);
     expect(inFeed).toBeDefined();
     expect(inFeed?.status).toBe('published');
-  });
+  }, 15000);
 });

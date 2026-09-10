@@ -322,6 +322,7 @@ export async function ensureDatabaseInitialized(): Promise<void> {
         } catch {
           // Ignored if column exists
         }
+        await seedDefaultSources();
       }
       if (process.env.NODE_ENV !== 'test' && !process.env.VITEST) {
         const { seedDemoArticlesIfEmpty } = await import('../server/db/seeds/demo-articles');

@@ -30,6 +30,7 @@ export interface Phase2WorkerRunSummary {
 export interface Phase2WorkerRunOptions {
   forceAllSources?: boolean;
   maxRetries?: number;
+  clusteringWindowHours?: number;
 }
 
 // Global in-process execution lock to prevent concurrent clusterer runs
@@ -111,7 +112,8 @@ export class AutonomousPhase2Worker {
     if (!isClusteringLocked) {
       isClusteringLocked = true;
       try {
-        newClusters = await this.clusterer.processUnclustered(36);
+        const windowHours = options?.clusteringWindowHours ?? 72;
+        newClusters = await this.clusterer.processUnclustered(windowHours);
         summary.clustersCreated = newClusters.length;
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
