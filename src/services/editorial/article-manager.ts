@@ -39,7 +39,7 @@ export class ArticleManager {
     const { draft, plagiarismAudit, readingTimeMinutes } = params.synthesisResult;
 
     // Calculate mean confidence score across verified claims
-    const totalConfidence = params.verifiedClaims.reduce((sum, c) => sum + c.confidenceScore, 0);
+    const totalConfidence = params.verifiedClaims.reduce((sum, c) => sum + (c.confidenceScore ?? 0.95), 0);
     const avgConfidence =
       params.verifiedClaims.length > 0
         ? (totalConfidence / params.verifiedClaims.length).toFixed(2)
@@ -234,11 +234,15 @@ export class ArticleManager {
     }
 
     // 2. Insert Citations
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     for (const cit of draft.citations) {
       const referencedClaim = params.verifiedClaims[cit.claimIndex];
+      const claimIdToInsert =
+        referencedClaim?.id && uuidRegex.test(referencedClaim.id) ? referencedClaim.id : null;
+
       await db.insert(schema.articleCitations).values({
         articleId: savedArticle.id,
-        claimId: referencedClaim?.id || null,
+        claimId: claimIdToInsert,
         citationIndex: cit.citationIndex,
         anchorText: cit.anchorText,
         primarySourceUrl: cit.primarySourceUrl,

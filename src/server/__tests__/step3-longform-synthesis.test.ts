@@ -9,6 +9,14 @@ import { MultiSourceWriterAgent } from '../agents/writer';
 import {
   buildSynthesisPrompts,
   sanitizeAndGroundCitations,
+  remapAndGroundCitations,
+  GroundingValidationError,
+  BilingualParityError,
+  validateBilingualParity,
+  validateEpistemicSeparation,
+  getCategoryEditorialTemplate,
+  CATEGORY_EDITORIAL_TEMPLATES,
+  normalizeVerifiedClaim,
   VerifiedClaimInput,
 } from '../../services/editorial/synthesis-agent';
 import { MockAiProvider } from '../../services/ai/mock-provider';
@@ -236,7 +244,113 @@ Anthropic evaluated the model against catastrophic risks under its Responsible S
       const packet = await researcher.buildEvidencePacket(story.id);
 
       expect(packet.primarySources[0].text).toBe(rssSnippet);
+      expect(packet.primarySources[0].extractionStatus).toBe('fallback_rss');
+      expect(packet.primarySources[0].retrievalStatus).toBe('fallback');
+      expect(packet.primarySources[0].provenance).toContain('RSS feed fallback');
       expect(packet.confirmedFacts.length).toBeGreaterThanOrEqual(1);
+
+      extractSpy.mockRestore();
+    });
+
+    it('triggers Jina Reader extraction on canonical primary URLs even when RSS text is long (> 2000 chars)', async () => {
+      const db = await getDb();
+
+      const [source] = await db
+        .insert(schema.sources)
+        .values({
+          name: 'DeepMind Research',
+          baseUrl: 'https://deepmind.google/blog/feed.xml',
+          sourceType: 'rss',
+          tier: 'tier_1_primary',
+        })
+        .returning();
+
+      const [story] = await db
+        .insert(schema.stories)
+        .values({
+          title: 'AlphaProof Solves Olympiad Problems',
+          summary: 'Formal reasoning system solves IMO problems.',
+          category: 'research',
+          editorialStatus: 'auto_approved',
+          riskLevel: 'low',
+          importanceScore: 98,
+          firstSeenAt: new Date(),
+          lastUpdatedAt: new Date(),
+          primarySourceId: source.id,
+        })
+        .returning();
+
+      // Long RSS snippet (> 2000 chars)
+      const longRssText = 'Google DeepMind announces AlphaProof. '.repeat(65); // ~2470 chars
+      expect(longRssText.length).toBeGreaterThan(2000);
+
+      const [rawArticle] = await db
+        .insert(schema.rawArticles)
+        .values({
+          sourceId: source.id,
+          canonicalUrl: 'https://deepmind.google/discover/blog/ai-solves-imo-problems-alphaproof',
+          title: 'AI Solves IMO Problems with AlphaProof',
+          cleanText: longRssText,
+          rawContent: longRssText,
+          contentHash: 'hash_step3_long_rss_test',
+        })
+        .returning();
+
+      await db.insert(schema.storySources).values({
+        storyId: story.id,
+        rawArticleId: rawArticle.id,
+        isPrimary: true,
+      });
+
+      const extractedJinaMarkdown = `# AlphaProof: Solving Mathematical Olympiad Problems with Formal Reasoning
+Google DeepMind introduces AlphaProof, a breakthrough system that bridges informal reasoning with formal mathematical verification in Lean.`;
+
+      const extractSpy = vi
+        .spyOn(externalResearch, 'extractCleanMarkdown')
+        .mockResolvedValueOnce(extractedJinaMarkdown);
+
+      const mockProvider = new MockAiProvider();
+      mockProvider.enqueueStructuredResponse({
+        claims: [
+          {
+            claimText: 'AlphaProof solves silver-medal level International Mathematical Olympiad problems.',
+            claimType: 'benchmark_result',
+            sourceExcerpt: 'system solves IMO problems.',
+            confidenceScore: 0.99,
+          },
+        ],
+      });
+      mockProvider.enqueueStructuredResponse({
+        entailment: 'supports',
+        verbatimExcerpt: 'system solves IMO problems.',
+        rationale: 'Confirmed from extraction.',
+        confidenceScore: 0.99,
+      });
+
+      const researcher = new MultiSourceResearcherAgent(mockProvider);
+      const packet = await researcher.buildEvidencePacket(story.id);
+
+      // Must call extractCleanMarkdown despite RSS description exceeding 2000 chars!
+      expect(extractSpy).toHaveBeenCalledWith(
+        'https://deepmind.google/discover/blog/ai-solves-imo-problems-alphaproof',
+        longRssText
+      );
+      expect(packet.primarySources[0].text).toBe(extractedJinaMarkdown);
+      expect(packet.primarySources[0].extractionStatus).toBe('jina_extracted');
+      expect(packet.primarySources[0].retrievalStatus).toBe('success');
+      expect(packet.primarySources[0].provenance).toContain('Jina Reader extracted');
+
+      // Check claim-level provenance fields
+      expect(packet.verifiedClaimsList).toBeDefined();
+      expect(packet.verifiedClaimsList!.length).toBeGreaterThanOrEqual(1);
+      const claim = packet.verifiedClaimsList![0];
+      expect(claim.claimId).toBeDefined();
+      expect(claim.claimText).toBe('AlphaProof solves silver-medal level International Mathematical Olympiad problems.');
+      expect(claim.sourceUrl).toBe('https://deepmind.google/discover/blog/ai-solves-imo-problems-alphaproof');
+      expect(claim.sourceTitle).toBe('DeepMind Research');
+      expect(claim.sourceType).toBe('tier_1_primary');
+      expect(claim.evidenceExcerpt).toBeDefined();
+      expect(claim.epistemicClass).toBeDefined();
 
       extractSpy.mockRestore();
     });
@@ -301,7 +415,7 @@ Anthropic evaluated the model against catastrophic risks under its Responsible S
   });
 
   describe('3. Citation Grounding & Sanitization Guard', () => {
-    it('sanitizes and grounds citations to prevent invalid claimIndex invariant violations', () => {
+    it('sanitizes, deterministically remaps, and strips ungrounded citation tokens without defaulting to claim[0]', () => {
       const verifiedClaims: VerifiedClaimInput[] = [
         {
           claimText: 'Llama 3.3 70B matches previous 405B capabilities on MMLU.',
@@ -313,7 +427,7 @@ Anthropic evaluated the model against catastrophic risks under its Responsible S
         },
       ];
 
-      // Hallucinated citations with invalid claimIndex (e.g. out of range index 5)
+      // Citation 1 matches claim 0. Citation 2 references non-existent claim 5 with no matching URL/anchorText.
       const rawCitations = [
         {
           citationIndex: 1,
@@ -325,20 +439,62 @@ Anthropic evaluated the model against catastrophic risks under its Responsible S
         {
           citationIndex: 2,
           claimIndex: 5, // Invalid claim index!
-          anchorText: 'Out of bounds',
-          primarySourceUrl: 'https://example.com/invalid',
-          sourcePublisher: 'Unknown',
+          anchorText: 'Completely ungrounded claim',
+          primarySourceUrl: 'https://unrelated-site.com/fake',
+          sourcePublisher: 'Unknown Hallucination',
         },
       ];
 
-      const sanitized = sanitizeAndGroundCitations(rawCitations, verifiedClaims);
+      const sampleEnText = 'Llama 3.3 was released[^1]. It possesses magical capabilities[^2].';
+      const result = remapAndGroundCitations({
+        rawCitations,
+        claims: verifiedClaims,
+        enContent: sampleEnText,
+      });
 
-      expect(sanitized).toHaveLength(1);
-      expect(sanitized[0].claimIndex).toBe(0);
-      expect(sanitized[0].sourcePublisher).toBe('Meta AI');
+      expect(result.citations).toHaveLength(1);
+      expect(result.citations[0].claimIndex).toBe(0);
+      expect(result.citations[0].sourcePublisher).toBe('Meta AI');
+      // Token [^2] must be stripped from the article text
+      expect(result.enContent).toContain('released[^1]');
+      expect(result.enContent).not.toContain('[^2]');
+      expect(result.unmappedIndices).toContain(2);
     });
 
-    it('generates fallback citation pointing to claim 0 when citations array is empty', () => {
+    it('deterministically remaps citation when claimIndex is out of bounds but source URL matches verified evidence', () => {
+      const verifiedClaims: VerifiedClaimInput[] = [
+        {
+          claimText: 'DeepSeek-V3 introduces Multi-head Latent Attention.',
+          claimType: 'architecture',
+          confidenceScore: 0.99,
+          primarySourceUrl: 'https://github.com/deepseek-ai/DeepSeek-V3',
+          sourcePublisher: 'DeepSeek AI',
+          verbatimExcerpt: 'DeepSeek-V3 adopts Multi-head Latent Attention.',
+        },
+      ];
+
+      // LLM mistakenly provided claimIndex: 99, but provided the exact source URL
+      const rawCitations = [
+        {
+          citationIndex: 1,
+          claimIndex: 99,
+          anchorText: 'Multi-head Latent Attention',
+          primarySourceUrl: 'https://github.com/deepseek-ai/DeepSeek-V3',
+          sourcePublisher: 'DeepSeek AI',
+        },
+      ];
+
+      const result = remapAndGroundCitations({
+        rawCitations,
+        claims: verifiedClaims,
+      });
+
+      expect(result.citations).toHaveLength(1);
+      expect(result.citations[0].claimIndex).toBe(0);
+      expect(result.citations[0].sourcePublisher).toBe('DeepSeek AI');
+    });
+
+    it('never defaults to claim[0] and fails validation with GroundingValidationError when citations array is empty', () => {
       const verifiedClaims: VerifiedClaimInput[] = [
         {
           claimText: 'Mistral releases Large 2 with 128k context.',
@@ -350,12 +506,44 @@ Anthropic evaluated the model against catastrophic risks under its Responsible S
         },
       ];
 
-      const sanitized = sanitizeAndGroundCitations([], verifiedClaims);
+      // Must never invent claim[0] — throws GroundingValidationError!
+      expect(() => sanitizeAndGroundCitations([], verifiedClaims)).toThrow(GroundingValidationError);
+      expect(() =>
+        remapAndGroundCitations({
+          rawCitations: [],
+          claims: verifiedClaims,
+        })
+      ).toThrow(GroundingValidationError);
+    });
 
-      expect(sanitized).toHaveLength(1);
-      expect(sanitized[0].citationIndex).toBe(1);
-      expect(sanitized[0].claimIndex).toBe(0);
-      expect(sanitized[0].sourcePublisher).toBe('Mistral AI');
+    it('fails validation with GroundingValidationError when all citations are ungrounded and 0 valid citations remain', () => {
+      const verifiedClaims: VerifiedClaimInput[] = [
+        {
+          claimText: 'Claude 3.7 Sonnet combines instant and thinking tokens.',
+          claimType: 'architecture',
+          confidenceScore: 0.98,
+          primarySourceUrl: 'https://anthropic.com/claude-3-7',
+          sourcePublisher: 'Anthropic',
+          verbatimExcerpt: 'Claude 3.7 Sonnet combines instant and thinking tokens.',
+        },
+      ];
+
+      const bogusCitations = [
+        {
+          citationIndex: 1,
+          claimIndex: 88,
+          anchorText: 'Completely unverified speculation',
+          primarySourceUrl: 'https://fake-news.xyz/unverified',
+          sourcePublisher: 'Fake Site',
+        },
+      ];
+
+      expect(() =>
+        remapAndGroundCitations({
+          rawCitations: bogusCitations,
+          claims: verifiedClaims,
+        })
+      ).toThrow(GroundingValidationError);
     });
   });
 
@@ -582,6 +770,224 @@ Gemini 2.0 Flash Thinking demonstrates that advanced reasoning no longer require
 
       expect(dbCitations).toHaveLength(1);
       expect(dbCitations[0].anchorText).toBe('Gemini 2.0 Flash Thinking');
+    });
+  });
+
+  describe('6. Fact / Context / Analysis Separation (Epistemic Protocol)', () => {
+    it('validates epistemic separation and rejects dogmatic unhedged speculation', () => {
+      const speculativeContent = `# The Rise of Autonomous Intelligence
+This release will certainly render all software engineers obsolete within two years. It represents an unprecedented breakthrough.`;
+
+      const result = validateEpistemicSeparation(speculativeContent);
+      expect(result.isValid).toBe(false);
+      expect(result.violations.length).toBeGreaterThan(0);
+      expect(result.violations[0]).toContain('Dogmatic speculation presented as unhedged fact');
+    });
+
+    it('rejects predictive forward-looking speculation inappropriately tagged with factual citations', () => {
+      const citedFuturePrediction = `# Future of Model Deployment
+In the coming decades, this architecture will replace all current GPU clusters[^1].`;
+
+      const result = validateEpistemicSeparation(citedFuturePrediction);
+      expect(result.isValid).toBe(false);
+      expect(result.violations[0]).toContain('Predictive speculation inappropriately tagged with factual citation');
+    });
+
+    it('approves rigorous journalism with proper analytical qualifiers and objective empirical grounding', () => {
+      const rigorousContent = `# Frontier Model Analysis
+The benchmark evaluations report an 82.1% score on MATH 500[^1]. Analysis suggests this architecture reduces KV-cache memory pressure during multi-turn generation. Industry observers note that real-world developer adoption will depend on API pricing tiers.`;
+
+      const result = validateEpistemicSeparation(rigorousContent);
+      expect(result.isValid).toBe(true);
+      expect(result.violations).toHaveLength(0);
+    });
+  });
+
+  describe('7. Category-Aware Article Structures', () => {
+    it('adapts mandatory technical sections across all 5 editorial categories', () => {
+      const categories = ['llm_release', 'agentic', 'infra', 'research', 'policy'] as const;
+      expect(Object.keys(CATEGORY_EDITORIAL_TEMPLATES)).toEqual(expect.arrayContaining(categories as unknown as string[]));
+
+      for (const cat of categories) {
+        const template = getCategoryEditorialTemplate(cat);
+        expect(template.category).toBe(cat);
+        expect(template.sections.length).toBeGreaterThanOrEqual(6);
+        expect(template.titleGuidance).toBeDefined();
+
+        // Check English and Bengali headings exist for each section
+        for (const s of template.sections) {
+          expect(s.enHeading).toBeDefined();
+          expect(s.bnHeading).toBeDefined();
+          expect(s.description).toBeDefined();
+          expect(['FACT', 'CONTEXT', 'ANALYSIS']).toContain(s.epistemicClass);
+        }
+      }
+
+      // Verify category-specific sections in prompt builder
+      const agenticPrompt = buildSynthesisPrompts(
+        {
+          topicTitle: 'OpenAI Operator Preview',
+          verifiedClaims: [
+            normalizeVerifiedClaim({
+              claimText: 'Operator executes browser actions autonomously.',
+              confidenceScore: 0.95,
+            }),
+          ],
+          rawSourceTexts: ['Operator runs browser tasks.'],
+          category: 'agentic',
+        },
+        true
+      );
+      expect(agenticPrompt.systemPrompt).toContain('EDITORIAL CATEGORY: AGENTIC');
+      expect(agenticPrompt.systemPrompt).toContain('## Autonomous Framework Overview');
+      expect(agenticPrompt.systemPrompt).toContain('## Tool Use & Execution Architecture');
+      expect(agenticPrompt.systemPrompt).toContain('## Reasoning Traces & Decision Benchmarks');
+
+      const infraPrompt = buildSynthesisPrompts(
+        {
+          topicTitle: 'Nvidia Blackwell Ultra Architecture',
+          verifiedClaims: [
+            normalizeVerifiedClaim({
+              claimText: 'Blackwell Ultra delivers 20 petaflops of FP4 compute.',
+              confidenceScore: 0.98,
+            }),
+          ],
+          rawSourceTexts: ['Blackwell compute details.'],
+          category: 'infra',
+        },
+        false
+      );
+      expect(infraPrompt.systemPrompt).toContain('EDITORIAL CATEGORY: INFRA');
+      expect(infraPrompt.systemPrompt).toContain('## Compute & Hardware Milestone');
+      expect(infraPrompt.systemPrompt).toContain('## Scalability, Throughput & Memory Bandwidth');
+      expect(infraPrompt.systemPrompt).toContain('## Efficiency & Serving Economics');
+
+      const policyPrompt = buildSynthesisPrompts(
+        {
+          topicTitle: 'EU AI Act Enforcement Begins',
+          verifiedClaims: [
+            normalizeVerifiedClaim({
+              claimText: 'EU establishes general-purpose AI model compliance requirements.',
+              confidenceScore: 0.96,
+            }),
+          ],
+          rawSourceTexts: ['EU AI Act details.'],
+          category: 'policy',
+        },
+        false
+      );
+      expect(policyPrompt.systemPrompt).toContain('EDITORIAL CATEGORY: POLICY');
+      expect(policyPrompt.systemPrompt).toContain('## Regulatory & Governance Action');
+      expect(policyPrompt.systemPrompt).toContain('## Enforcement Mechanisms & Compliance Standards');
+    });
+  });
+
+  describe('8. English + Bangla Information Parity Validation', () => {
+    it('approves dual-language articles with high information parity and rich sections', () => {
+      const draft = {
+        slug: 'llama-parity-test',
+        en: {
+          title: 'Meta Releases Llama 3.3 with 70B Parameters',
+          summary: 'Meta releases high-efficiency open model.',
+          content: `# Headline
+Executive summary of the release.
+## What Happened
+Meta has officially launched Llama 3.3 70B[^1].
+## Architecture & Technical Mechanics
+The model incorporates grouped-query attention and optimized rotary position embeddings.
+## Performance & Benchmarks
+Evaluations on MMLU reach 88.6%[^1].
+## Background & Industry Context
+Llama 3.3 matches earlier 405B capabilities.
+## Limitations, Safety & Practical Constraints
+Requires multi-GPU setup for unquantized weights.
+## The Bottom Line
+Reduces compute barriers for developers globally.`,
+          keyTakeaways: ['Key takeaway 1', 'Key takeaway 2'],
+        },
+        bn: {
+          title: 'মেটা উন্মোচন করল লামা ৩.৩ ৭০বি মডেল',
+          summary: 'উচ্চ কার্যক্ষমতার নতুন ওপেন-সোর্স মডেল।',
+          content: `# শিরোনাম
+মডেলের মূল ঘোষণা ও নির্বাহী সারসংক্ষেপ।
+## মূল ঘোষণা ও প্রেক্ষাপট
+মেটা আনুষ্ঠানিকভাবে লামা ৩.৩ ৭০বি মডেল প্রকাশ করেছে[^1]।
+## আর্কিটেকচার ও প্রযুক্তিগত কার্যপ্রণালী
+গ্রুপড-কোয়েরি অ্যাটেনশন এবং উন্নত রোটারি পজিশন এম্বেডিং প্রযুক্তির সমন্বয় করা হয়েছে।
+## কর্মক্ষমতা ও বেঞ্চমার্ক ফলাফল
+এমএমএলইউ মূল্যায়নে মডেলটি ৮৮.৬% নির্ভুলতা প্রদর্শন করেছে[^1]।
+## পটভূমি ও প্রযুক্তি বিশ্বের প্রেক্ষাপট
+পূর্ববর্তী ৪০৫বি মডেলের সমকক্ষ ফলাফল প্রদান করে।
+## সীমাবদ্ধতা, সুরক্ষা ও ব্যবহারিক চ্যালেঞ্জ
+সম্পূর্ণ মডেল পরিচালনায় উচ্চ কম্পিউট পরিকাঠামো প্রয়োজন।
+## সামগ্রিক মূল্যায়ন ও ভবিষ্যতের পথরেখা
+গবেষক ও ডেভেলপারদের কম্পিউট ব্যয় বহুলাংশে হ্রাস করবে।`,
+          keyTakeaways: ['মূল তথ্য ১', 'মূল তথ্য ২'],
+        },
+        citations: [
+          {
+            citationIndex: 1,
+            claimIndex: 0,
+            anchorText: 'Llama 3.3',
+            primarySourceUrl: 'https://ai.meta.com',
+            sourcePublisher: 'Meta',
+          },
+        ],
+      };
+
+      const result = validateBilingualParity(draft);
+      expect(result.isValid).toBe(true);
+      expect(result.wordCountRatio).toBeGreaterThan(0.25);
+      expect(result.bnSectionsCount).toBeGreaterThanOrEqual(6);
+    });
+
+    it('rejects lossy, truncated Bengali summary that lacks substantive sections', () => {
+      const truncatedDraft = {
+        slug: 'truncated-summary-test',
+        en: {
+          title: 'Google DeepMind Unveils Gemini 2.0 Flash Thinking with Native Reasoning',
+          summary: 'A low-latency frontier reasoning model.',
+          content: `# Gemini 2.0 Flash Thinking
+Google DeepMind has officially unveiled Gemini 2.0 Flash Thinking[^1].
+## What Happened
+The release marks Google formal entry into test-time compute scaling. Available in Google AI Studio and Vertex AI.
+## Architecture & Technical Mechanics
+Unlike traditional scratchpad models, Flash Thinking generates native reasoning tokens directly within its latent layers.
+## Performance & Benchmarks
+In comprehensive evaluations, the model scored 82.1% on MATH 500.
+## Background & Industry Context
+The release comes amidst an industry-wide pivot toward test-time reasoning compute.
+## Limitations, Safety & Practical Constraints
+DeepMind notes several practical constraints. The model is currently provided as an experimental preview.
+## The Bottom Line
+Demonstrates that advanced reasoning no longer requires sacrificing interactive speed.`,
+          keyTakeaways: ['Takeaway 1', 'Takeaway 2'],
+        },
+        bn: {
+          title: 'গুগল নতুন মডেল উন্মোচন করল',
+          summary: 'সংক্ষিপ্ত সারসংক্ষেপ।',
+          content: 'গুগল একটি নতুন রিজনিং মডেল প্রকাশ করেছে যা খুব দ্রুত কাজ করে। এটি এখন ব্যবহার করা যাবে।',
+          keyTakeaways: [],
+        },
+        citations: [
+          {
+            citationIndex: 1,
+            claimIndex: 0,
+            anchorText: 'Gemini',
+            primarySourceUrl: 'https://google.com',
+            sourcePublisher: 'Google',
+          },
+        ],
+      };
+
+      const result = validateBilingualParity(truncatedDraft);
+      expect(result.isValid).toBe(false);
+      expect(result.reasons.length).toBeGreaterThan(0);
+      expect(result.error).toContain('severely truncated');
+
+      expect(() => {
+        throw new BilingualParityError('Sample parity failure');
+      }).toThrow(BilingualParityError);
     });
   });
 });

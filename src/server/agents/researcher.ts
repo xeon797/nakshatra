@@ -7,9 +7,13 @@ import { AiModelProvider } from '../../services/ai/provider';
 import { getAiProvider } from '../../services/ai/factory';
 import { AgentAuditLogger } from '../../services/research/audit-logger';
 import { extractCleanMarkdown } from '../services/external-research';
-import { StructuredEvidenceDetails } from '../../services/editorial/synthesis-agent';
+import {
+  StructuredEvidenceDetails,
+  StrictVerifiedClaim,
+  normalizeVerifiedClaim,
+} from '../../services/editorial/synthesis-agent';
 
-export { type StructuredEvidenceDetails } from '../../services/editorial/synthesis-agent';
+export { type StructuredEvidenceDetails, type StrictVerifiedClaim } from '../../services/editorial/synthesis-agent';
 
 export interface SourceInput {
   title: string;
@@ -17,6 +21,10 @@ export interface SourceInput {
   text: string;
   sourceName?: string;
   sourceTier?: string;
+  extractionStatus?: 'jina_extracted' | 'fallback_rss' | 'raw';
+  retrievalStatus?: 'success' | 'fallback' | 'failed';
+  retrievedAt?: string;
+  provenance?: string;
 }
 
 export interface EvidencePacket {
@@ -26,6 +34,8 @@ export interface EvidencePacket {
   confirmedFacts: string[];
   differingPerspectives: string[];
   structuredDetails?: StructuredEvidenceDetails;
+  category?: string;
+  verifiedClaimsList?: StrictVerifiedClaim[];
 }
 
 const OFFICIAL_LAB_DOMAINS = [
@@ -267,40 +277,76 @@ export class MultiSourceResearcherAgent {
     });
 
     // Deep Primary Source Enrichment:
-    // Fetch full-text markdown via Jina Reader whenever text is shallow (< 2000 chars)
+    // Treat RSS as discovery metadata: attempt Jina Reader extraction from canonical URL
+    // regardless of RSS description length. Keep RSS text as fallback if extraction fails.
     for (const pSrc of primarySources) {
-      if (pSrc.url && pSrc.url.startsWith('http') && (!pSrc.text || pSrc.text.trim().length < 2000)) {
+      if (pSrc.url && pSrc.url.startsWith('http')) {
+        const originalRssText = pSrc.text || '';
+        pSrc.retrievedAt = new Date().toISOString();
         try {
-          const fullMarkdown = await extractCleanMarkdown(pSrc.url, pSrc.text);
-          if (fullMarkdown && fullMarkdown.length > pSrc.text.length) {
+          const fullMarkdown = await extractCleanMarkdown(pSrc.url, originalRssText);
+          if (fullMarkdown && fullMarkdown.trim().length > 0) {
             pSrc.text = fullMarkdown;
+            pSrc.extractionStatus = 'jina_extracted';
+            pSrc.retrievalStatus = 'success';
+            pSrc.provenance = `Jina Reader extracted from ${pSrc.url}`;
+          } else {
+            pSrc.text = originalRssText;
+            pSrc.extractionStatus = 'fallback_rss';
+            pSrc.retrievalStatus = 'fallback';
+            pSrc.provenance = `RSS feed fallback from ${pSrc.url}`;
           }
         } catch {
-          // Fallback cleanly to RSS text
+          // Keep RSS text as fallback only when primary extraction fails
+          pSrc.text = originalRssText;
+          pSrc.extractionStatus = 'fallback_rss';
+          pSrc.retrievalStatus = 'fallback';
+          pSrc.provenance = `RSS feed fallback from ${pSrc.url}`;
         }
+      } else {
+        pSrc.extractionStatus = 'raw';
+        pSrc.retrievalStatus = 'fallback';
+        pSrc.provenance = 'Direct raw text';
       }
     }
 
-    // Also enrich shallow secondary sources (< 1000 chars) for richer contextual depth
+    // Also enrich secondary sources if HTTP URL is available
     for (const sSrc of secondarySources.slice(0, 2)) {
-      if (sSrc.url && sSrc.url.startsWith('http') && (!sSrc.text || sSrc.text.trim().length < 1000)) {
+      if (sSrc.url && sSrc.url.startsWith('http')) {
+        const originalText = sSrc.text || '';
+        sSrc.retrievedAt = new Date().toISOString();
         try {
-          const fullMarkdown = await extractCleanMarkdown(sSrc.url, sSrc.text);
-          if (fullMarkdown && fullMarkdown.length > sSrc.text.length) {
+          const fullMarkdown = await extractCleanMarkdown(sSrc.url, originalText);
+          if (fullMarkdown && fullMarkdown.trim().length > 0) {
             sSrc.text = fullMarkdown;
+            sSrc.extractionStatus = 'jina_extracted';
+            sSrc.retrievalStatus = 'success';
+            sSrc.provenance = `Jina Reader extracted from ${sSrc.url}`;
+          } else {
+            sSrc.text = originalText;
+            sSrc.extractionStatus = 'fallback_rss';
+            sSrc.retrievalStatus = 'fallback';
+            sSrc.provenance = `Secondary metadata fallback from ${sSrc.url}`;
           }
         } catch {
-          // Fallback cleanly to RSS text
+          sSrc.text = originalText;
+          sSrc.extractionStatus = 'fallback_rss';
+          sSrc.retrievalStatus = 'fallback';
+          sSrc.provenance = `Secondary metadata fallback from ${sSrc.url}`;
         }
       }
     }
 
     // 3. Extract claims from primary and secondary sources
     const allClaimsToVerify: Array<{
+      claimId: string;
       claimText: string;
       claimType: string;
       isFromPrimary: boolean;
-      sourceExcerpt?: string;
+      sourceUrl: string;
+      sourceTitle: string;
+      sourceType: string;
+      evidenceExcerpt: string;
     }> = [];
 
     for (const pSrc of primarySources) {
@@ -312,10 +358,14 @@ export class MultiSourceResearcherAgent {
         });
         for (const c of claims) {
           allClaimsToVerify.push({
+            claimId: `claim-p-${allClaimsToVerify.length + 1}`,
             claimText: c.claimText,
             claimType: c.claimType,
             isFromPrimary: true,
-            sourceExcerpt: c.sourceExcerpt,
+            sourceUrl: pSrc.url,
+            sourceTitle: pSrc.sourceName || pSrc.title || 'Primary Source',
+            sourceType: pSrc.sourceTier || 'tier_1_primary',
+            evidenceExcerpt: c.sourceExcerpt || c.claimText,
           });
         }
       } catch {
@@ -332,10 +382,14 @@ export class MultiSourceResearcherAgent {
         });
         for (const c of claims) {
           allClaimsToVerify.push({
+            claimId: `claim-s-${allClaimsToVerify.length + 1}`,
             claimText: c.claimText,
             claimType: c.claimType,
             isFromPrimary: false,
-            sourceExcerpt: c.sourceExcerpt,
+            sourceUrl: sSrc.url,
+            sourceTitle: sSrc.sourceName || sSrc.title || 'Secondary Source',
+            sourceType: sSrc.sourceTier || 'tier_2_verified',
+            evidenceExcerpt: c.sourceExcerpt || c.claimText,
           });
         }
       } catch {
@@ -360,6 +414,7 @@ export class MultiSourceResearcherAgent {
       isPrimary: boolean;
       isConfirmed: boolean;
     }> = [];
+    const verifiedClaimsList: StrictVerifiedClaim[] = [];
 
     if (allClaimsToVerify.length > 0 && primaryDocs.length > 0) {
       try {
@@ -375,6 +430,18 @@ export class MultiSourceResearcherAgent {
 
           if (isConfirmed) {
             confirmedFacts.push(outcome.claimText);
+            verifiedClaimsList.push(
+              normalizeVerifiedClaim({
+                claimId: claimMeta.claimId,
+                claimText: outcome.claimText,
+                sourceUrl: claimMeta.sourceUrl,
+                sourceTitle: claimMeta.sourceTitle,
+                sourceType: claimMeta.sourceType,
+                evidenceExcerpt: outcome.evidences[0]?.verbatimExcerpt || claimMeta.evidenceExcerpt,
+                epistemicClass: 'FACT',
+                confidenceScore: outcome.confidenceScore ?? 0.95,
+              })
+            );
           } else if (
             outcome.verificationStatus === 'disputed' ||
             outcome.verificationStatus === 'debunked' ||
@@ -382,6 +449,18 @@ export class MultiSourceResearcherAgent {
             !claimMeta?.isFromPrimary
           ) {
             differingPerspectives.push(outcome.claimText);
+            verifiedClaimsList.push(
+              normalizeVerifiedClaim({
+                claimId: claimMeta.claimId,
+                claimText: outcome.claimText,
+                sourceUrl: claimMeta.sourceUrl,
+                sourceTitle: claimMeta.sourceTitle,
+                sourceType: claimMeta.sourceType,
+                evidenceExcerpt: outcome.evidences[0]?.verbatimExcerpt || claimMeta.evidenceExcerpt,
+                epistemicClass: 'ANALYSIS',
+                confidenceScore: outcome.confidenceScore ?? 0.85,
+              })
+            );
           }
 
           verifiedClaimsWithTypes.push({
@@ -398,7 +477,8 @@ export class MultiSourceResearcherAgent {
 
     // If no claims extracted or verified, populate with titles/summaries
     if (confirmedFacts.length === 0) {
-      for (const p of primarySources) {
+      for (let idx = 0; idx < primarySources.length; idx++) {
+        const p = primarySources[idx];
         if (p.text && p.text.trim().length > 0) {
           confirmedFacts.push(p.title);
           verifiedClaimsWithTypes.push({
@@ -407,12 +487,25 @@ export class MultiSourceResearcherAgent {
             isPrimary: true,
             isConfirmed: true,
           });
+          verifiedClaimsList.push(
+            normalizeVerifiedClaim({
+              claimId: `claim-p-fallback-${idx + 1}`,
+              claimText: p.title,
+              sourceUrl: p.url,
+              sourceTitle: p.sourceName || 'Primary Lab',
+              sourceType: p.sourceTier || 'tier_1_primary',
+              evidenceExcerpt: p.text.slice(0, 300),
+              epistemicClass: 'FACT',
+              confidenceScore: 0.90,
+            })
+          );
         }
       }
     }
 
     if (differingPerspectives.length === 0) {
-      for (const s of secondarySources) {
+      for (let idx = 0; idx < secondarySources.length; idx++) {
+        const s = secondarySources[idx];
         if (s.title && s.title !== primarySources[0]?.title) {
           differingPerspectives.push(s.title);
           verifiedClaimsWithTypes.push({
@@ -421,6 +514,18 @@ export class MultiSourceResearcherAgent {
             isPrimary: false,
             isConfirmed: false,
           });
+          verifiedClaimsList.push(
+            normalizeVerifiedClaim({
+              claimId: `claim-s-fallback-${idx + 1}`,
+              claimText: s.title,
+              sourceUrl: s.url,
+              sourceTitle: s.sourceName || 'Industry Perspective',
+              sourceType: s.sourceTier || 'tier_2_verified',
+              evidenceExcerpt: s.text.slice(0, 300),
+              epistemicClass: 'CONTEXT',
+              confidenceScore: 0.85,
+            })
+          );
         }
       }
     }
@@ -440,6 +545,8 @@ export class MultiSourceResearcherAgent {
       confirmedFacts: Array.from(new Set(confirmedFacts)),
       differingPerspectives: Array.from(new Set(differingPerspectives)),
       structuredDetails,
+      category: story.category || 'llm_release',
+      verifiedClaimsList,
     };
   }
 }
