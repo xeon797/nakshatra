@@ -20,6 +20,7 @@
 .env.test.local
 .env.production.local
 .pgdata/
+data/
 *.sqlite
 *.sqlite3
 

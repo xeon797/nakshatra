@@ -16,7 +16,8 @@
     "db:studio": "drizzle-kit studio",
     "worker": "tsx scripts/worker.ts",
     "worker:once": "tsx scripts/worker.ts --once",
-    "smoke:test": "tsx scripts/smoke-test.ts"
+    "smoke:test": "tsx scripts/smoke-test.ts",
+    "integration:test:live": "tsx scripts/live-api-probe.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.2.14",

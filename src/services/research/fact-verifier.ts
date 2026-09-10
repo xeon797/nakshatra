@@ -15,6 +15,20 @@ export type VerificationVerdict = z.infer<typeof VerificationVerdictSchema> & {
   completionTokens?: number;
 };
 
+export const BatchClaimVerificationSchema = z.object({
+  verdicts: z.array(
+    z.object({
+      claimIndex: z.number().describe('0-indexed pointer matching the input claims list.'),
+      entailment: z.enum(['supports', 'refutes', 'inconclusive']).describe('Whether the source text supports, refutes, or is inconclusive.'),
+      verbatimExcerpt: z.string().default('').describe('Verbatim quote from the source supporting or refuting the claim.'),
+      rationale: z.string().default('').describe('Explanation for entailment decision.'),
+      confidenceScore: z.number().min(0).max(1).default(0.95),
+    })
+  ),
+});
+
+export type BatchClaimVerification = z.infer<typeof BatchClaimVerificationSchema>;
+
 export interface SourceDocument {
   id: string;
   url: string;
@@ -90,6 +104,105 @@ Determine whether the source SUPPORTS, REFUTES, or is INCONCLUSIVE regarding the
     };
   }
 
+  /**
+   * Batch verifies multiple claims against a single source document in ONE structured LLM call,
+   * avoiding N * M sequential Gemini requests and prompt token re-transmission.
+   */
+  async verifyClaimsBatchAgainstSource(params: {
+    claims: Array<{ claimText: string; claimType: string }>;
+    source: SourceDocument;
+  }): Promise<{
+    verdicts: Map<number, VerificationVerdict>;
+    promptTokens: number;
+    completionTokens: number;
+  }> {
+    if (params.claims.length === 0) {
+      return { verdicts: new Map(), promptTokens: 0, completionTokens: 0 };
+    }
+
+    if (params.claims.length === 1) {
+      const single = await this.verifyClaimAgainstSource({
+        claimText: params.claims[0].claimText,
+        source: params.source,
+      });
+      const map = new Map<number, VerificationVerdict>();
+      map.set(0, single);
+      return {
+        verdicts: map,
+        promptTokens: single.promptTokens ?? 0,
+        completionTokens: single.completionTokens ?? 0,
+      };
+    }
+
+    const systemPrompt = `You are an elite, uncompromising Fact-Checking Agent for NAKSHATRA.
+Your job is to perform strict Natural Language Inference (NLI) on a list of candidate claims against a single source document in ONE batch.
+
+RULES:
+1. "supports": The source document explicitly and unambiguously states or entails the claim.
+2. "refutes": The source document contradicts or disproves the claim.
+3. "inconclusive": The source document does NOT mention this claim, or only vaguely touches on it without proving it.
+4. "verbatimExcerpt" MUST be an exact quote taken from the source document.
+5. "claimIndex" MUST be the 0-indexed integer corresponding to each claim in the numbered claims list.`;
+
+    const claimsListPrompt = params.claims
+      .map((c, idx) => `[Claim ${idx}] (${c.claimType}): "${c.claimText}"`)
+      .join('\n');
+
+    const userPrompt = `Source Document (${params.source.sourceName} - Tier: ${params.source.sourceTier}):
+"""
+${params.source.text}
+"""
+
+Evaluate each of the following ${params.claims.length} claims against the source document above:
+${claimsListPrompt}
+
+Return a verdicts array with an entry for each claim index in strict JSON.`;
+
+    try {
+      const response = await this.aiProvider.generateStructured(
+        userPrompt,
+        BatchClaimVerificationSchema,
+        {
+          systemPrompt,
+          temperature: 0.05,
+        }
+      );
+
+      const map = new Map<number, VerificationVerdict>();
+      for (const item of response.data.verdicts) {
+        map.set(item.claimIndex, {
+          entailment: item.entailment,
+          verbatimExcerpt: item.verbatimExcerpt || '',
+          rationale: item.rationale || '',
+          confidenceScore: item.confidenceScore ?? 0.95,
+          promptTokens: 0,
+          completionTokens: 0,
+        });
+      }
+
+      return {
+        verdicts: map,
+        promptTokens: response.promptTokens,
+        completionTokens: response.completionTokens,
+      };
+    } catch {
+      // Graceful fallback to sequential verification if batch parsing fails
+      const map = new Map<number, VerificationVerdict>();
+      let pTokens = 0;
+      let cTokens = 0;
+      for (let i = 0; i < params.claims.length; i++) {
+        const single = await this.verifyClaimAgainstSource({
+          claimText: params.claims[i].claimText,
+          source: params.source,
+        });
+        map.set(i, single);
+        pTokens += single.promptTokens ?? 0;
+        cTokens += single.completionTokens ?? 0;
+      }
+      return { verdicts: map, promptTokens: pTokens, completionTokens: cTokens };
+    }
+  }
+
   async verifyClaimsGraph(params: {
     claims: Array<{ claimText: string; claimType: string }>;
     sources: SourceDocument[];
@@ -115,6 +228,26 @@ Determine whether the source SUPPORTS, REFUTES, or is INCONCLUSIVE regarding the
     let totalCompletionTokens = 0;
 
     try {
+      // 1. Batch verify all claims across each source document
+      // This reduces N * M Gemini calls down to M calls (e.g. 10 calls -> 1-2 calls)
+      const sourceVerdicts = new Map<string, Map<number, VerificationVerdict>>();
+
+      for (const source of params.sources) {
+        const batchRes = await this.verifyClaimsBatchAgainstSource({
+          claims: params.claims,
+          source,
+        });
+        totalPromptTokens += batchRes.promptTokens;
+        totalCompletionTokens += batchRes.completionTokens;
+        sourceVerdicts.set(source.id, batchRes.verdicts);
+      }
+
+      // Check whether authoritative primary lab evidence is already present for this story
+      const hasAuthoritativePrimary = params.sources.some(
+        (s) => s.sourceTier === 'tier_1_primary' && s.text.trim().length > 300
+      );
+
+      // 2. Aggregate evidence per claim
       for (let i = 0; i < params.claims.length; i++) {
         const claim = params.claims[i];
         const evidences: VerifiedClaimOutcome['evidences'] = [];
@@ -124,13 +257,14 @@ Determine whether the source SUPPORTS, REFUTES, or is INCONCLUSIVE regarding the
         let maxConfidence = 0;
 
         for (const source of params.sources) {
-          const verdict = await this.verifyClaimAgainstSource({
-            claimText: claim.claimText,
-            source,
-          });
-
-          totalPromptTokens += verdict.promptTokens ?? 0;
-          totalCompletionTokens += verdict.completionTokens ?? 0;
+          const verdictsForSource = sourceVerdicts.get(source.id);
+          let verdict = verdictsForSource?.get(i);
+          if (!verdict) {
+            verdict = await this.verifyClaimAgainstSource({
+              claimText: claim.claimText,
+              source,
+            });
+          }
 
           evidences.push({
             sourceUrl: source.url,
@@ -168,8 +302,15 @@ Determine whether the source SUPPORTS, REFUTES, or is INCONCLUSIVE regarding the
           verificationStatus = 'verified_primary'; // Single verified source in MVP
         }
 
-        // Corroborate controversial/unverified claims using Tavily secondary source discovery
-        if (verificationStatus === 'disputed' || verificationStatus === 'unverified') {
+        // 3. Conditional Tavily Search:
+        // Principle: Only call Tavily if:
+        // - The claim is disputed (contradicted between sources), OR
+        // - The claim is unverified AND we do NOT already have authoritative primary lab documentation
+        const isContradicted = refutesCount > 0;
+        const needsTavilyCorroboration =
+          isContradicted || (verificationStatus === 'unverified' && !hasAuthoritativePrimary);
+
+        if (needsTavilyCorroboration) {
           try {
             const secondaryResults = await searchSecondarySources(claim.claimText);
             for (let sIdx = 0; sIdx < secondaryResults.length; sIdx++) {

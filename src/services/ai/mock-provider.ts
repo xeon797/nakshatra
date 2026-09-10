@@ -25,6 +25,12 @@ export class MockAiProvider implements AiModelProvider {
     this.mockTextResponse = text;
   }
 
+  clear() {
+    this.mockStructuredQueue = [];
+    this.mockStructuredResponse = null;
+    this.mockTextResponse = 'Mock response';
+  }
+
   async generateText(prompt: string, options?: AiCallOptions): Promise<AiResponse> {
     return {
       text: this.mockTextResponse,
@@ -91,6 +97,32 @@ export class MockAiProvider implements AiModelProvider {
         reasoning: 'Confirmed against primary source text.',
         citationUrls: ['https://example.com/primary'],
       },
+      // BatchClaimVerificationSchema
+      {
+        verdicts: [
+          {
+            claimIndex: 0,
+            entailment: 'supports',
+            verbatimExcerpt: 'Confirmed in primary source text.',
+            rationale: 'Direct statement confirms claim.',
+            confidenceScore: 0.98,
+          },
+          {
+            claimIndex: 1,
+            entailment: 'supports',
+            verbatimExcerpt: 'Confirmed in primary source text.',
+            rationale: 'Direct statement confirms claim.',
+            confidenceScore: 0.98,
+          },
+          {
+            claimIndex: 2,
+            entailment: 'supports',
+            verbatimExcerpt: 'Confirmed in primary source text.',
+            rationale: 'Direct statement confirms claim.',
+            confidenceScore: 0.98,
+          },
+        ],
+      },
       // BilingualArticleDraftSchema
       {
         slug: `frontier-ai-breakthrough-${Date.now().toString(36)}`,
@@ -132,7 +164,31 @@ export class MockAiProvider implements AiModelProvider {
   ): Promise<AiStructuredResponse<T>> {
     let rawData: unknown;
     if (this.mockStructuredQueue.length > 0) {
-      rawData = this.mockStructuredQueue.shift();
+      const firstItem = this.mockStructuredQueue[0] as Record<string, unknown> | undefined;
+      const isBatchSchema = schema.safeParse({ verdicts: [] }).success;
+
+      if (firstItem && typeof firstItem === 'object' && firstItem.entailment && isBatchSchema) {
+        const collectedVerdicts: unknown[] = [];
+        let idx = 0;
+        while (this.mockStructuredQueue.length > 0) {
+          const next = this.mockStructuredQueue[0] as Record<string, unknown> | undefined;
+          if (next && next.entailment) {
+            const popped = this.mockStructuredQueue.shift() as Record<string, unknown>;
+            collectedVerdicts.push({
+              claimIndex: idx++,
+              entailment: popped.entailment,
+              verbatimExcerpt: popped.verbatimExcerpt || '',
+              rationale: popped.rationale || '',
+              confidenceScore: popped.confidenceScore || 0.95,
+            });
+          } else {
+            break;
+          }
+        }
+        rawData = { verdicts: collectedVerdicts };
+      } else {
+        rawData = this.mockStructuredQueue.shift();
+      }
     } else if (this.mockStructuredResponse) {
       rawData = this.mockStructuredResponse;
     } else {

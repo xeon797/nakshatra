@@ -162,21 +162,18 @@ export class AutonomousPhase2Worker {
         try {
           const evidencePacket = await this.researcher.buildEvidencePacket(story.id);
           currentStage = 'writing';
-          await this.writer.synthesizeStoryArticle(evidencePacket);
 
-          // Mark story completed and published
-          await db
-            .update(schema.stories)
-            .set({
-              editorialStatus: 'published',
-              processingStatus: 'completed',
-              failureReason: null,
-              failureStage: null,
-              lastUpdatedAt: new Date(),
-            })
-            .where(eq(schema.stories.id, story.id));
+          // Pass publication intent explicitly based on upstream editorial decision
+          const publicationIntent =
+            story.editorialStatus === 'auto_approved' ? 'published' : 'review_pending';
 
-          summary.autoApprovedArticlesPublished++;
+          const savedArticle = await this.writer.synthesizeStoryArticle(evidencePacket, {
+            publicationIntent,
+          });
+
+          if (savedArticle.status === 'published') {
+            summary.autoApprovedArticlesPublished++;
+          }
         } catch (err) {
           const classification = classifyError(err);
           const currentRetries = story.retryCount || 0;

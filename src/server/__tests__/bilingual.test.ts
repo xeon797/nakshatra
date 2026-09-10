@@ -188,7 +188,8 @@ describe('Phase 3.5: Full Bilingual Architecture (English & Bengali)', () => {
     expect(synthesized.contentBn).toContain('রিজনিং মডেল');
     expect(synthesized.slug).toMatch(/^[a-z0-9-]+$/);
     expect(synthesized.keyTakeawaysBn.length).toBeGreaterThanOrEqual(1);
-    expect(synthesized.status).toBe('review_pending');
+    expect(synthesized.status).toBe('published');
+    expect(synthesized.publishedAt).toBeDefined();
   });
 
   it('Module 4: Subscribers table persists language preference with default "bn"', async () => {

@@ -2,15 +2,35 @@ import { drizzle as drizzlePg } from 'drizzle-orm/node-postgres';
 import { drizzle as drizzlePglite } from 'drizzle-orm/pglite';
 import { PGlite } from '@electric-sql/pglite';
 import pg from 'pg';
+import path from 'path';
+import fs from 'fs';
 import * as schema from './schema';
 import { resetInitForTesting } from './init';
 
 const { Pool } = pg;
 
-type AppDatabase = ReturnType<typeof drizzlePg<typeof schema>> | ReturnType<typeof drizzlePglite<typeof schema>>;
+export type AppDatabase = ReturnType<typeof drizzlePg<typeof schema>> | ReturnType<typeof drizzlePglite<typeof schema>>;
 
 let cachedDb: AppDatabase | null = null;
 let pgliteInstance: PGlite | null = null;
+
+/**
+ * Resolves the active data directory for embedded PGlite.
+ * In development and non-test runtime, defaults to project-local `data/pglite`.
+ * In automated test suites (Vitest), defaults to in-memory unless explicitly overridden via PGLITE_DATA_DIR.
+ */
+export function getPgliteDataDir(): string | undefined {
+  if (process.env.PGLITE_DATA_DIR) {
+    return process.env.PGLITE_DATA_DIR;
+  }
+
+  const isTest = process.env.NODE_ENV === 'test' || Boolean(process.env.VITEST);
+  if (isTest) {
+    return undefined;
+  }
+
+  return path.resolve(process.cwd(), 'data/pglite');
+}
 
 export async function getDb(): Promise<AppDatabase> {
   if (cachedDb) {
@@ -40,15 +60,43 @@ export async function getDb(): Promise<AppDatabase> {
     }
   }
 
-  // In-process embedded PostgreSQL (PGlite) for local development / test isolation
+  // Embedded PostgreSQL (PGlite):
+  // Uses persistent local filesystem directory in development/runtime; in-memory in test mode
   if (!pgliteInstance) {
-    pgliteInstance = new PGlite();
+    const dataDir = getPgliteDataDir();
+    if (dataDir) {
+      fs.mkdirSync(dataDir, { recursive: true });
+      pgliteInstance = new PGlite(dataDir);
+    } else {
+      pgliteInstance = new PGlite();
+    }
   }
+
   cachedDb = drizzlePglite(pgliteInstance, { schema });
   return cachedDb;
 }
 
+export async function closeDb(): Promise<void> {
+  if (pgliteInstance) {
+    try {
+      await pgliteInstance.close();
+    } catch {
+      // Ignore close errors
+    }
+    pgliteInstance = null;
+  }
+  cachedDb = null;
+  resetInitForTesting();
+}
+
 export function resetDbForTesting(): void {
+  if (pgliteInstance) {
+    try {
+      pgliteInstance.close();
+    } catch {
+      // Ignore close errors
+    }
+  }
   cachedDb = null;
   pgliteInstance = null;
   resetInitForTesting();

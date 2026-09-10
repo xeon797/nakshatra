@@ -7,6 +7,11 @@ import { getDb } from '../../db';
 import * as schema from '../../db/schema';
 import { eq } from 'drizzle-orm';
 
+export interface SynthesizeStoryArticleOptions {
+  publicationIntent?: 'published' | 'review_pending';
+  forcePublish?: boolean;
+}
+
 export class MultiSourceWriterAgent {
   private synthesisAgent: EditorialSynthesisAgent;
   private articleManager: ArticleManager;
@@ -18,10 +23,13 @@ export class MultiSourceWriterAgent {
   }
 
   /**
-   * Synthesizes an authoritative article from an aggregated EvidencePacket
+   * Synthesizes an authoritative article from an aggregated EvidencePacket.
+   * Upstream editorial decision determines publication intent.
+   * Auto-approved stories are published immediately; others remain in review_pending.
    */
   async synthesizeStoryArticle(
-    evidencePacket: EvidencePacket
+    evidencePacket: EvidencePacket,
+    options?: SynthesizeStoryArticleOptions
   ): Promise<typeof schema.articles.$inferSelect> {
     const db = await getDb();
 
@@ -33,6 +41,14 @@ export class MultiSourceWriterAgent {
       .limit(1);
 
     const topicTitle = story ? story.title : 'AI Intelligence Briefing';
+
+    // Upstream editorial decision determines publication intent
+    const isAutoApproved = story?.editorialStatus === 'auto_approved';
+    const shouldPublish =
+      options?.publicationIntent === 'published' ||
+      (options?.publicationIntent === undefined && (options?.forcePublish ?? isAutoApproved));
+    const targetStatus: 'published' | 'review_pending' = shouldPublish ? 'published' : 'review_pending';
+    const targetPublishedAt = shouldPublish ? new Date() : null;
 
     // 2. Prepare verified claims from confirmedFacts and differingPerspectives
     const verifiedClaims: VerifiedClaimInput[] = [];
@@ -92,20 +108,22 @@ export class MultiSourceWriterAgent {
         rawSourceTexts,
       });
 
-      // 5. Persist draft article in PostgreSQL with dual-language fields
-      const savedDraft = await this.articleManager.saveDraftArticle({
+      // 5. Persist article in PostgreSQL with dual-language fields and determined publication state
+      const savedArticle = await this.articleManager.saveDraftArticle({
         synthesisResult: bilingualResult,
         bilingualDraft: bilingualResult.bilingualDraft,
         storyId: story?.id,
         verifiedClaims,
+        status: targetStatus,
+        publishedAt: targetPublishedAt,
       });
 
-      // 6. Update story status to published
+      // 6. Update story publication state finalized ONLY after successful article persistence
       if (story) {
         await db
           .update(schema.stories)
           .set({
-            editorialStatus: 'published',
+            editorialStatus: savedArticle.status === 'published' ? 'published' : story.editorialStatus,
             processingStatus: 'completed',
             failureReason: null,
             failureStage: null,
@@ -114,7 +132,7 @@ export class MultiSourceWriterAgent {
           .where(eq(schema.stories.id, story.id));
       }
 
-      return savedDraft;
+      return savedArticle;
     } catch {
       // Graceful fallback to single-language synthesis
       const synthesisResult = await this.synthesisAgent.synthesizeArticle({
@@ -123,17 +141,20 @@ export class MultiSourceWriterAgent {
         rawSourceTexts,
       });
 
-      const savedDraft = await this.articleManager.saveDraftArticle({
+      const savedArticle = await this.articleManager.saveDraftArticle({
         synthesisResult,
         storyId: story?.id,
         verifiedClaims,
+        status: targetStatus,
+        publishedAt: targetPublishedAt,
       });
 
+      // 6. Update story publication state finalized ONLY after successful article persistence
       if (story) {
         await db
           .update(schema.stories)
           .set({
-            editorialStatus: 'published',
+            editorialStatus: savedArticle.status === 'published' ? 'published' : story.editorialStatus,
             processingStatus: 'completed',
             failureReason: null,
             failureStage: null,
@@ -142,7 +163,7 @@ export class MultiSourceWriterAgent {
           .where(eq(schema.stories.id, story.id));
       }
 
-      return savedDraft;
+      return savedArticle;
     }
   }
 }

@@ -178,7 +178,8 @@ describe('Module 4 & 5: Multi-Source Researcher, Writer & Phase 2 Worker', () =>
 
     expect(article.id).toBeDefined();
     expect(article.title).toContain('OpenAI Launches Operator');
-    expect(article.status).toBe('review_pending');
+    expect(article.status).toBe('published');
+    expect(article.publishedAt).toBeDefined();
 
     // Verify story status updated to published
     const [updatedStory] = await db

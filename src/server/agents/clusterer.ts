@@ -166,23 +166,45 @@ export function hasHighRiskKeywords(text: string): boolean {
 
 /**
  * Module 3: Triage Logic for Editorial Risk Classification & Gatekeeping
+ * 
+ * Importance & Risk Gating:
+ * - High Risk (regulatory crackdowns, lawsuits, security breaches, leaks):
+ *   Always 'needs_review' so human editors can verify safety, regardless of score.
+ * - Low Importance (importanceScore < 40):
+ *   Rejected immediately if risk is not high, preventing low-value or spam stories
+ *   from triggering expensive research, Jina extraction, Gemini verification, and synthesis.
+ * - Medium Risk or Borderline Importance (40 <= score < 50):
+ *   'needs_review' for editorial triage.
+ * - Low Risk & High Importance (score >= 50):
+ *   'auto_approved' for autonomous synthesis and publishing.
  */
 export function determineEditorialStatus(
   riskLevel: 'low' | 'medium' | 'high',
-  _importanceScore: number
+  importanceScore: number
 ): 'auto_approved' | 'needs_review' | 'rejected' {
-  if (riskLevel === 'low') {
-    // Official product documentation, verified arXiv papers, developer tool updates
-    return 'auto_approved';
-  }
-
-  if (riskLevel === 'medium') {
-    // Benchmark claims, market acquisitions, competitive performance comparisons
+  // 1. High Risk: Safety/security incidents, copyright/lawsuits, regulatory crackdowns, unverified leaks
+  // Strictly requires human review ALWAYS, never auto-approved and never silently dropped
+  if (riskLevel === 'high') {
     return 'needs_review';
   }
 
-  // risk_level === 'high': Safety/security incidents, copyright/lawsuits, regulatory crackdowns, unverified leaks
-  // -> strictly requires human review ALWAYS, never auto-approved
+  // 2. Story Importance Gate: Discard low-value or trivial stories before expensive processing
+  if (importanceScore < 40) {
+    return 'rejected';
+  }
+
+  // 3. Medium Risk: Benchmark claims, market acquisitions, competitive performance comparisons
+  if (riskLevel === 'medium') {
+    return 'needs_review';
+  }
+
+  // 4. Low Risk:
+  // Major stories (importance >= 50) are auto_approved for publication
+  // Borderline stories (40 <= importance < 50) are held for editorial review
+  if (importanceScore >= 50) {
+    return 'auto_approved';
+  }
+
   return 'needs_review';
 }
 
