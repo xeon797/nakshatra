@@ -23,6 +23,8 @@
     "@electric-sql/pglite": "^0.2.14",
     "@google/genai": "^2.21.0",
     "@google/generative-ai": "^0.24.1",
+    "@neon/config": "^1.3.2",
+    "@neon/env": "^1.2.3",
     "@types/pg": "^8.11.10",
     "cheerio": "^1.0.0",
     "clsx": "^2.1.1",
