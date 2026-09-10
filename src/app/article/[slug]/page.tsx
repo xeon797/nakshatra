@@ -12,30 +12,40 @@ interface Props {
 }
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
-  await ensureDatabaseInitialized();
-  const { slug } = await params;
-  const manager = new ArticleManager();
-  const article = await manager.getArticleBySlug(slug);
+  try {
+    await ensureDatabaseInitialized();
+    const { slug } = await params;
+    const manager = new ArticleManager();
+    const article = await manager.getArticleBySlug(slug);
 
-  if (!article) return { title: 'Article Not Found | NAKSHATRA' };
+    if (!article) return { title: 'Article Not Found | NAKSHATRA' };
 
-  return {
-    title: `${article.title} | NAKSHATRA`,
-    description: article.metaDescription,
-    openGraph: {
-      title: article.title,
+    return {
+      title: `${article.title} | NAKSHATRA`,
       description: article.metaDescription,
-      type: 'article',
-      publishedTime: article.publishedAt ? new Date(article.publishedAt).toISOString() : undefined,
-    },
-  };
+      openGraph: {
+        title: article.title,
+        description: article.metaDescription,
+        type: 'article',
+        publishedTime: article.publishedAt ? new Date(article.publishedAt).toISOString() : undefined,
+      },
+    };
+  } catch (err) {
+    console.error('[generateMetadata] Error fetching article metadata:', err);
+    return { title: 'NAKSHATRA | AI Intelligence' };
+  }
 }
 
 export default async function ArticlePage({ params }: Props) {
-  await ensureDatabaseInitialized();
-  const { slug } = await params;
-  const manager = new ArticleManager();
-  const article = await manager.getArticleBySlug(slug);
+  let article = null;
+  try {
+    await ensureDatabaseInitialized();
+    const { slug } = await params;
+    const manager = new ArticleManager();
+    article = await manager.getArticleBySlug(slug);
+  } catch (err) {
+    console.error('[ArticlePage] Error fetching article:', err);
+  }
 
   if (!article) {
     notFound();

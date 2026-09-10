@@ -16,29 +16,37 @@ import { HomeFeedHeader, FeedSectionHeading } from '../components/home/HomeFeedH
 export const dynamic = 'force-dynamic';
 
 export default async function HomePage() {
-  await ensureDatabaseInitialized();
-  const db = await getDb();
+  let activeSourcesCount = 12;
+  let storiesIngestedToday = 0;
+  let rawPublishedArticles: Awaited<ReturnType<ArticleManager['getPublishedArticlesWithMetadata']>> = [];
 
-  // 1. Fetch live pulse statistics
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
+  try {
+    await ensureDatabaseInitialized();
+    const db = await getDb();
 
-  const [activeSourcesRow] = await db
-    .select({ count: sql<number>`count(*)` })
-    .from(schema.sources)
-    .where(eq(schema.sources.isActive, true));
+    // 1. Fetch live pulse statistics
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
 
-  const [ingestedTodayRow] = await db
-    .select({ count: sql<number>`count(*)` })
-    .from(schema.rawArticles)
-    .where(gte(schema.rawArticles.createdAt, todayStart));
+    const [activeSourcesRow] = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(schema.sources)
+      .where(eq(schema.sources.isActive, true));
 
-  const activeSourcesCount = Number(activeSourcesRow?.count || 12);
-  const storiesIngestedToday = Number(ingestedTodayRow?.count || 0);
+    const [ingestedTodayRow] = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(schema.rawArticles)
+      .where(gte(schema.rawArticles.createdAt, todayStart));
 
-  // 2. Fetch published articles with story and source metadata
-  const articleManager = new ArticleManager();
-  const rawPublishedArticles = await articleManager.getPublishedArticlesWithMetadata(40, 0);
+    activeSourcesCount = Number(activeSourcesRow?.count || 12);
+    storiesIngestedToday = Number(ingestedTodayRow?.count || 0);
+
+    // 2. Fetch published articles with story and source metadata
+    const articleManager = new ArticleManager();
+    rawPublishedArticles = await articleManager.getPublishedArticlesWithMetadata(40, 0);
+  } catch (err) {
+    console.error('[HomePage] Database query failed, rendering resilient fallback:', err);
+  }
 
   const articlesPublishedCount = rawPublishedArticles.length;
 
@@ -54,10 +62,10 @@ export default async function HomePage() {
     summaryBn: a.summaryBn || a.deck,
     category: a.story?.category || 'llm_release',
     riskLevel: a.story?.riskLevel || 'low',
-    confidenceScore: a.confidenceScore,
-    readingTimeMinutes: a.readingTimeMinutes,
+    confidenceScore: a.confidenceScore || '0.95',
+    readingTimeMinutes: a.readingTimeMinutes || 3,
     publishedAt: a.publishedAt,
-    sources: a.sources,
+    sources: a.sources || [],
     imageUrl: a.imageUrl || a.heroImageUrl || null,
   }));
 

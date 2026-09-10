@@ -29,6 +29,13 @@ export function getPgliteDataDir(): string | undefined {
     return undefined;
   }
 
+  // On Vercel / AWS Lambda / Serverless, process.cwd() is read-only (/var/task).
+  // Use /tmp which is the only writable directory in serverless environments.
+  const isServerless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.LAMBDA_TASK_ROOT);
+  if (isServerless) {
+    return path.resolve('/tmp', 'nakshatra-pglite');
+  }
+
   return path.resolve(process.cwd(), 'data/pglite');
 }
 
@@ -37,7 +44,8 @@ export async function getDb(): Promise<AppDatabase> {
     return cachedDb;
   }
 
-  const databaseUrl = process.env.DATABASE_URL;
+  const isTest = process.env.NODE_ENV === 'test' || Boolean(process.env.VITEST);
+  const databaseUrl = isTest && !process.env.TEST_WITH_REAL_DB ? undefined : process.env.DATABASE_URL;
 
   if (databaseUrl && !databaseUrl.includes('placeholder')) {
     try {
@@ -58,15 +66,25 @@ export async function getDb(): Promise<AppDatabase> {
     } catch (err) {
       console.warn('[DB] Failed to connect to external PostgreSQL, falling back to embedded PGlite:', err);
     }
+  } else if (process.env.NODE_ENV === 'production') {
+    console.warn(
+      '[DB WARNING] DATABASE_URL is not configured in production environment variables. ' +
+      'Falling back to temporary embedded PGlite. Configure DATABASE_URL in Vercel project settings to persist data to Neon PostgreSQL.'
+    );
   }
 
   // Embedded PostgreSQL (PGlite):
-  // Uses persistent local filesystem directory in development/runtime; in-memory in test mode
+  // Uses persistent local filesystem directory in development/runtime; in-memory in test mode or if filesystem is read-only
   if (!pgliteInstance) {
     const dataDir = getPgliteDataDir();
     if (dataDir) {
-      fs.mkdirSync(dataDir, { recursive: true });
-      pgliteInstance = new PGlite(dataDir);
+      try {
+        fs.mkdirSync(dataDir, { recursive: true });
+        pgliteInstance = new PGlite(dataDir);
+      } catch (fsErr) {
+        console.warn(`[DB] Could not initialize PGlite directory at ${dataDir}, falling back to in-memory:`, fsErr);
+        pgliteInstance = new PGlite();
+      }
     } else {
       pgliteInstance = new PGlite();
     }

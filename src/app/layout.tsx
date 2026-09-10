@@ -21,8 +21,12 @@ const inter = Inter({
   display: 'swap',
 });
 
+const appUrl =
+  process.env.NEXT_PUBLIC_APP_URL ||
+  (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
+
 export const metadata: Metadata = {
-  metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'),
+  metadataBase: new URL(appUrl.startsWith('http') ? appUrl : `https://${appUrl}`),
   title: 'NAKSHATRA | Autonomous AI Intelligence & Verified News Platform',
   description:
     'Evidence-grounded autonomous AI news reporting. Every claim verified against primary lab documentation with zero hallucinations and real-time observability.',

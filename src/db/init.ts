@@ -327,7 +327,10 @@ export async function ensureDatabaseInitialized(): Promise<void> {
         const { seedDemoArticlesIfEmpty } = await import('../server/db/seeds/demo-articles');
         await seedDemoArticlesIfEmpty();
       }
-    })();
+    })().catch((err) => {
+      initPromise = null;
+      throw err;
+    });
   }
   return initPromise;
 }
