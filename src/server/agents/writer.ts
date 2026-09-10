@@ -59,10 +59,26 @@ export class MultiSourceWriterAgent {
       sourceName: 'Primary Source',
     };
 
+    const inferClaimType = (fact: string): 'benchmark_result' | 'product_release' | 'quote' | 'architecture' | 'policy_or_safety' => {
+      if (/(?:benchmark|mmlu|gsm8k|humaneval|swe-bench|score|accuracy|percent|%|sota|outperform)/i.test(fact)) {
+        return 'benchmark_result';
+      }
+      if (/(?:architecture|parameter|context window|weights|transformer|token|latency|inference|training|reasoning)/i.test(fact)) {
+        return 'architecture';
+      }
+      if (/(?:limitat|risk|safety|guardrail|pricing|cost|preview|compute)/i.test(fact)) {
+        return 'policy_or_safety';
+      }
+      if (/^["'].*["']$/.test(fact.trim()) || /(?:said|stated|commented|explained)/i.test(fact)) {
+        return 'quote';
+      }
+      return 'product_release';
+    };
+
     for (const fact of evidencePacket.confirmedFacts) {
       verifiedClaims.push({
         claimText: fact,
-        claimType: 'product_release',
+        claimType: inferClaimType(fact),
         confidenceScore: 0.98,
         primarySourceUrl: primarySource.url,
         sourcePublisher: primarySource.sourceName || 'Primary Lab',
@@ -74,7 +90,7 @@ export class MultiSourceWriterAgent {
       const secondarySource = evidencePacket.secondarySources[0] || primarySource;
       verifiedClaims.push({
         claimText: perspective,
-        claimType: 'quote',
+        claimType: inferClaimType(perspective) === 'product_release' ? 'quote' : inferClaimType(perspective),
         confidenceScore: 0.85,
         primarySourceUrl: secondarySource.url,
         sourcePublisher: secondarySource.sourceName || 'Industry Analysis',
@@ -106,6 +122,10 @@ export class MultiSourceWriterAgent {
         topicTitle,
         verifiedClaims,
         rawSourceTexts,
+        structuredEvidence: evidencePacket.structuredDetails,
+        storyClusterId: story?.id,
+        primarySourceUrl: primarySource.url,
+        primaryPublisher: primarySource.sourceName || 'Primary Lab',
       });
 
       // 5. Persist article in PostgreSQL with dual-language fields and determined publication state
@@ -139,6 +159,10 @@ export class MultiSourceWriterAgent {
         topicTitle,
         verifiedClaims,
         rawSourceTexts,
+        structuredEvidence: evidencePacket.structuredDetails,
+        storyClusterId: story?.id,
+        primarySourceUrl: primarySource.url,
+        primaryPublisher: primarySource.sourceName || 'Primary Lab',
       });
 
       const savedArticle = await this.articleManager.saveDraftArticle({
