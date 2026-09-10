@@ -1,11 +1,7 @@
 {
   "crons": [
     {
-      "path": "/api/cron/pipeline",
-      "schedule": "*/15 * * * *"
-    },
-    {
-      "path": "/api/cron/newsletter",
+      "path": "/api/newsletter/send",
       "schedule": "0 2 * * *"
     }
   ]
