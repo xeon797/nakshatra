@@ -32,9 +32,10 @@ export async function POST(request: NextRequest) {
     });
 
     return response;
-  } catch (err: any) {
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Authentication error.';
     return NextResponse.json(
-      { success: false, error: err?.message || 'Authentication error.' },
+      { success: false, error: message },
       { status: 500 }
     );
   }

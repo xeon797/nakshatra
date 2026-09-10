@@ -192,7 +192,6 @@ describe('Phase 3.5: Full Bilingual Architecture (English & Bengali)', () => {
   });
 
   it('Module 4: Subscribers table persists language preference with default "bn"', async () => {
-    const db = await getDb();
     const service = new NewsletterService();
 
     // 1. Subscribe without explicit language -> default to 'bn'

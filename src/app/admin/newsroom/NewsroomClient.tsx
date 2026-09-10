@@ -93,8 +93,9 @@ export default function NewsroomClient({ initialDrafts }: { initialDrafts: Draft
       } else {
         setActionStatus(`Pipeline notice: ${data.error}`);
       }
-    } catch (err: any) {
-      setActionStatus(`Execution error: ${err.message}`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setActionStatus(`Execution error: ${msg}`);
     } finally {
       setIsTriggering(false);
     }
@@ -166,7 +167,7 @@ export default function NewsroomClient({ initialDrafts }: { initialDrafts: Draft
           <CheckCircle2 className="w-8 h-8 text-[#1e0a3c] mx-auto" />
           <h3 className="text-base font-bold font-display text-[#120424]">Editorial Queue Clear</h3>
           <p className="text-xs text-[#6e6e6e] max-w-sm mx-auto">
-            All ingested drafts have been approved or rejected. Click "Run Autonomous Ingestion" to poll primary feeds.
+            All ingested drafts have been approved or rejected. Click &quot;Run Autonomous Ingestion&quot; to poll primary feeds.
           </p>
         </div>
       ) : (

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { parseEnv, validateProductionEnv } from '../../lib/env';
-import { timingSafeCompare, verifyCronSecret, getCronSecret } from '../../lib/auth';
+import { timingSafeCompare, verifyCronSecret } from '../../lib/auth';
 
 describe('Environment Variable Validator & Security Auditing', () => {
   it('parses valid environment variables with sensible defaults', () => {

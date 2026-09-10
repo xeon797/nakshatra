@@ -43,11 +43,16 @@ export async function POST(
       return NextResponse.json({ success: false, error: `Story ${id} not found` }, { status: 404 });
     }
 
-    // 2. Transition status to auto_approved
+    // 2. Transition status to auto_approved and reset failure retry state
     await db
       .update(schema.stories)
       .set({
         editorialStatus: 'auto_approved',
+        processingStatus: 'processing',
+        retryCount: 0,
+        failureReason: null,
+        failureStage: null,
+        lastAttemptedAt: new Date(),
         lastUpdatedAt: new Date(),
       })
       .where(eq(schema.stories.id, id));
@@ -66,9 +71,10 @@ export async function POST(
       articleId: generatedArticle.id,
       slug: generatedArticle.slug,
     });
-  } catch (err: any) {
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Promotion failed';
     return NextResponse.json(
-      { success: false, error: err.message || 'Promotion failed' },
+      { success: false, error: message },
       { status: 500 }
     );
   }

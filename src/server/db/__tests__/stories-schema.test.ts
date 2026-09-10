@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { getDb, resetDbForTesting } from '../../../db';
 import { initializeDatabase } from '../../../db/init';
 import * as schema from '../../../db/schema';
-import { seedSources, HIGH_SIGNAL_AI_SOURCES } from '../seeds/sources';
+import { seedSources } from '../seeds/sources';
 import { eq } from 'drizzle-orm';
 
 describe('Module 1: Database Schema Expansion & High-Signal Source Seeding', () => {

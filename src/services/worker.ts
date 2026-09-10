@@ -13,7 +13,17 @@ export interface WorkerRunSummary {
 }
 
 export interface OrchestratorLike {
-  processSource(sourceId: string, xmlOverride?: string): Promise<any>;
+  processSource(
+    sourceId: string,
+    xmlOverride?: string
+  ): Promise<{
+    sourceName?: string;
+    articlesIngested?: number;
+    draftsGenerated?: number;
+    synthesizedArticles?: unknown[];
+    failures: string[];
+    articleIds?: string[];
+  }>;
 }
 
 /**
@@ -52,12 +62,17 @@ export async function runWorkerCycle(options?: {
     summary.sourcesProcessed++;
     try {
       const report = await orchestrator.processSource(source.id);
-      summary.articlesSynthesized += report.synthesizedArticles.length;
+      const count =
+        ('synthesizedArticles' in report && Array.isArray(report.synthesizedArticles)
+          ? report.synthesizedArticles.length
+          : report.draftsGenerated) ?? 0;
+      summary.articlesSynthesized += count;
       if (report.failures.length > 0) {
         summary.errors.push(...report.failures);
       }
-    } catch (err: any) {
-      const msg = `Failed to process source ${source.name}: ${err.message || String(err)}`;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      const msg = `Failed to process source ${source.name}: ${message}`;
       summary.errors.push(msg);
     }
   }
@@ -91,7 +106,7 @@ export async function startWorkerDaemon(options?: {
       console.log(
         `[NAKSHATRA Worker] Processed ${summary.sourcesProcessed}/${summary.sourcesPolled} sources | Synthesized: ${summary.articlesSynthesized} | Errors: ${summary.errors.length}`
       );
-    } catch (err: any) {
+    } catch (err) {
       console.error('[NAKSHATRA Worker Error]', err);
     }
 

@@ -2,15 +2,26 @@ import { getDb } from '../../db';
 import * as schema from '../../db/schema';
 import { RssFeedAdapter, ParsedFeedItem } from './rss-adapter';
 import { isNearDuplicate } from './dedup';
-import { eq, desc, or } from 'drizzle-orm';
+import { eq, desc, or, inArray } from 'drizzle-orm';
+
+export const DEFAULT_RECENT_FEED_WINDOW = 50;
+export const DEFAULT_OVERLAP_WINDOW_HOURS = 48;
+
+export interface IngestSourceOptions {
+  xmlOverride?: string;
+  recentWindowLimit?: number;
+  overlapHours?: number;
+}
 
 export interface IngestionResult {
   sourceId: string;
   sourceName: string;
   totalFetched: number;
+  candidatesInspected: number;
   insertedCount: number;
   exactDuplicatesSkipped: number;
   nearDuplicatesSkipped: number;
+  historicalSkipped: number;
   errors: string[];
 }
 
@@ -22,17 +33,27 @@ export class IngestionService {
   }
 
   /**
-   * Ingests news items for a single source definition
+   * Ingests news items for a single source definition using safe incremental windowing
+   * and batch deduplication checks.
    */
-  async ingestSource(source: typeof schema.sources.$inferSelect, xmlOverride?: string): Promise<IngestionResult> {
+  async ingestSource(
+    source: typeof schema.sources.$inferSelect,
+    optionsOrXml?: string | IngestSourceOptions
+  ): Promise<IngestionResult> {
     const db = await getDb();
+    const xmlOverride = typeof optionsOrXml === 'string' ? optionsOrXml : optionsOrXml?.xmlOverride;
+    const windowLimit = typeof optionsOrXml === 'object' ? (optionsOrXml.recentWindowLimit ?? DEFAULT_RECENT_FEED_WINDOW) : DEFAULT_RECENT_FEED_WINDOW;
+    const overlapHours = typeof optionsOrXml === 'object' ? (optionsOrXml.overlapHours ?? DEFAULT_OVERLAP_WINDOW_HOURS) : DEFAULT_OVERLAP_WINDOW_HOURS;
+
     const result: IngestionResult = {
       sourceId: source.id,
       sourceName: source.name,
       totalFetched: 0,
+      candidatesInspected: 0,
       insertedCount: 0,
       exactDuplicatesSkipped: 0,
       nearDuplicatesSkipped: 0,
+      historicalSkipped: 0,
       errors: [],
     };
 
@@ -43,14 +64,52 @@ export class IngestionService {
       } else {
         items = await this.rssAdapter.parseUrl(source.baseUrl);
       }
-    } catch (err: any) {
-      result.errors.push(err.message || String(err));
+    } catch (err) {
+      result.errors.push(err instanceof Error ? err.message : String(err));
       return result;
     }
 
     result.totalFetched = items.length;
 
-    // Fetch recent raw articles to check near-duplicate SimHash
+    // ─────────────────────────────────────────────────────────────────────────
+    // Safe Incremental Partitioning:
+    // 1. In RSS/Atom feeds, newest updates are placed at the beginning of the feed.
+    // 2. We inspect a generous recent window (default 50 items) to guarantee that even high-volume
+    //    or delayed feeds (e.g. arXiv cs.AI with 1,180 historical items) do not exhaust DB queries.
+    // 3. To avoid naive timestamp-only filtering (which can miss delayed, out-of-order, or timezone-skewed entries),
+    //    we ALWAYS include:
+    //    a) All items within the top windowLimit (first 50 items) regardless of timestamp.
+    //    b) Any items beyond the window whose publishedAt falls within the generous overlap window (last 48h).
+    // 4. Deep historical items beyond the window from weeks or years ago are safely skipped.
+    // ─────────────────────────────────────────────────────────────────────────
+    const now = Date.now();
+    const overlapCutoffMs = now - overlapHours * 60 * 60 * 1000;
+
+    const candidateItems: ParsedFeedItem[] = [];
+
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (i < windowLimit) {
+        candidateItems.push(item);
+      } else if (item.publishedAt && item.publishedAt.getTime() >= overlapCutoffMs) {
+        // Include recent overlap items even if ordered further down in feed
+        candidateItems.push(item);
+      } else {
+        result.historicalSkipped++;
+      }
+    }
+
+    result.candidatesInspected = candidateItems.length;
+
+    if (candidateItems.length === 0) {
+      await db
+        .update(schema.sources)
+        .set({ lastPolledAt: new Date(), updatedAt: new Date() })
+        .where(eq(schema.sources.id, source.id));
+      return result;
+    }
+
+    // Fetch recent raw articles to check near-duplicate SimHash (O(100) items)
     const recentArticles = await db
       .select({
         id: schema.rawArticles.id,
@@ -62,28 +121,45 @@ export class IngestionService {
       .orderBy(desc(schema.rawArticles.createdAt))
       .limit(100);
 
-    for (const item of items) {
-      // 1. Exact Deduplication Check (URL or SHA-256 Hash across entire database)
-      const exactInBatch = recentArticles.find(
-        (r) => r.canonicalUrl === item.canonicalUrl || r.contentHash === item.contentHash
-      );
-      if (exactInBatch) {
+    // ─────────────────────────────────────────────────────────────────────────
+    // High-Efficiency Batch Deduplication:
+    // Query existing canonical URLs and content hashes for the candidate set in ONE roundtrip
+    // instead of N sequential SQL queries.
+    // ─────────────────────────────────────────────────────────────────────────
+    const candidateUrls = candidateItems.map((c) => c.canonicalUrl).filter(Boolean);
+    const candidateHashes = candidateItems.map((c) => c.contentHash).filter(Boolean);
+
+    const existingInDb =
+      candidateUrls.length > 0 || candidateHashes.length > 0
+        ? await db
+            .select({
+              canonicalUrl: schema.rawArticles.canonicalUrl,
+              contentHash: schema.rawArticles.contentHash,
+            })
+            .from(schema.rawArticles)
+            .where(
+              or(
+                inArray(schema.rawArticles.canonicalUrl, candidateUrls),
+                inArray(schema.rawArticles.contentHash, candidateHashes)
+              )
+            )
+        : [];
+
+    const knownUrls = new Set<string>(existingInDb.map((e) => e.canonicalUrl));
+    const knownHashes = new Set<string>(existingInDb.map((e) => e.contentHash));
+
+    for (const item of candidateItems) {
+      // 1. Exact Deduplication Check (URL or SHA-256 Hash across batch set)
+      if (knownUrls.has(item.canonicalUrl) || knownHashes.has(item.contentHash)) {
         result.exactDuplicatesSkipped++;
         continue;
       }
 
-      const [exactMatchInDb] = await db
-        .select({ id: schema.rawArticles.id })
-        .from(schema.rawArticles)
-        .where(
-          or(
-            eq(schema.rawArticles.canonicalUrl, item.canonicalUrl),
-            eq(schema.rawArticles.contentHash, item.contentHash)
-          )
-        )
-        .limit(1);
-
-      if (exactMatchInDb) {
+      // Check within recentArticles in-memory cache as well
+      const exactInBatch = recentArticles.find(
+        (r) => r.canonicalUrl === item.canonicalUrl || r.contentHash === item.contentHash
+      );
+      if (exactInBatch) {
         result.exactDuplicatesSkipped++;
         continue;
       }
@@ -127,18 +203,22 @@ export class IngestionService {
 
         result.insertedCount++;
         // Track inserted item for subsequent checks in this batch
+        knownUrls.add(inserted.canonicalUrl);
+        knownHashes.add(inserted.contentHash);
         recentArticles.unshift({
           id: inserted.id,
           contentHash: inserted.contentHash,
           canonicalUrl: inserted.canonicalUrl,
           simhashFingerprint: inserted.simhashFingerprint,
         });
-      } catch (err: any) {
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        const code = (err as { code?: string })?.code;
         // Handle race conditions or unique constraint violations gracefully
-        if (err.message?.includes('unique') || err.code === '23505') {
+        if (message.includes('unique') || code === '23505') {
           result.exactDuplicatesSkipped++;
         } else {
-          result.errors.push(`Failed to insert article ${item.canonicalUrl}: ${err.message}`);
+          result.errors.push(`Failed to insert article ${item.canonicalUrl}: ${message}`);
         }
       }
     }

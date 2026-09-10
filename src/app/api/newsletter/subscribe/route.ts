@@ -33,7 +33,7 @@ export async function POST(request: NextRequest) {
       email: result.subscriber.email,
       topics: result.subscriber.topics,
     });
-  } catch (err: any) {
+  } catch (err) {
     if (err instanceof z.ZodError) {
       return NextResponse.json(
         { success: false, error: err.errors[0]?.message || 'Validation error' },
@@ -41,8 +41,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const message = err instanceof Error ? err.message : 'Internal server error while subscribing';
     return NextResponse.json(
-      { success: false, error: err.message || 'Internal server error while subscribing' },
+      { success: false, error: message },
       { status: 500 }
     );
   }

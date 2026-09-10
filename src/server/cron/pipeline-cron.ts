@@ -1,67 +1,14 @@
-﻿import { NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { getDb } from '../../db';
 import * as schema from '../../db/schema';
 import { ensureDatabaseInitialized } from '../../db/init';
 import { verifyCronSecret } from '../../lib/auth';
 import { AutonomousPhase2Worker } from '../worker';
-import { eq, and } from 'drizzle-orm';
-
-const LOCK_NAME = 'pipeline_cron';
-const LOCK_LEASE_MS = 10 * 60 * 1000; // 10 minutes
-
-async function acquireLock(db: any, lockName: string, ownerId: string): Promise<boolean> {
-  const now = new Date();
-  const expiresAt = new Date(now.getTime() + LOCK_LEASE_MS);
-
-  const existing = await db
-    .select()
-    .from(schema.systemLocks)
-    .where(eq(schema.systemLocks.lockName, lockName))
-    .limit(1);
-
-  if (existing.length > 0) {
-    const lock = existing[0];
-    if (new Date(lock.expiresAt).getTime() > now.getTime()) {
-      return false;
-    }
-    await db
-      .update(schema.systemLocks)
-      .set({
-        lockedAt: now,
-        expiresAt,
-        ownerId,
-      })
-      .where(eq(schema.systemLocks.lockName, lockName));
-    return true;
-  }
-
-  try {
-    await db.insert(schema.systemLocks).values({
-      lockName,
-      lockedAt: now,
-      expiresAt,
-      ownerId,
-    });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function releaseLock(db: any, lockName: string, ownerId: string): Promise<void> {
-  try {
-    await db
-      .delete(schema.systemLocks)
-      .where(
-        and(
-          eq(schema.systemLocks.lockName, lockName),
-          eq(schema.systemLocks.ownerId, ownerId)
-        )
-      );
-  } catch (err) {
-    console.warn('[Pipeline Cron] Failed to release lock:', err);
-  }
-}
+import {
+  acquirePipelineLock,
+  releasePipelineLock,
+  PIPELINE_GLOBAL_LOCK,
+} from '../lib/pipeline-lock';
 
 export async function handlePipelineCron(req: Request, workerInstance?: AutonomousPhase2Worker) {
   if (!verifyCronSecret(req)) {
@@ -72,7 +19,7 @@ export async function handlePipelineCron(req: Request, workerInstance?: Autonomo
   const db = await getDb();
   const ownerId = `cron-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
 
-  const lockAcquired = await acquireLock(db, LOCK_NAME, ownerId);
+  const lockAcquired = await acquirePipelineLock(db, { lockName: PIPELINE_GLOBAL_LOCK, ownerId });
   if (!lockAcquired) {
     return NextResponse.json(
       { status: 'skipped', reason: 'job_already_running' },
@@ -99,19 +46,19 @@ export async function handlePipelineCron(req: Request, workerInstance?: Autonomo
         runStatus = 'partial_error';
       }
     }
-  } catch (err: any) {
+  } catch (err) {
     runStatus = 'error';
-    errorMessage = err.message || String(err);
+    errorMessage = err instanceof Error ? err.message : String(err);
     workerSummary = {
       sourcesPolled: 0,
       sourcesProcessed: 0,
       rawArticlesIngested: 0,
       clustersCreated: 0,
       autoApprovedArticlesPublished: 0,
-      errors: [errorMessage!],
+      errors: [errorMessage],
     };
   } finally {
-    await releaseLock(db, LOCK_NAME, ownerId);
+    await releasePipelineLock(db, { lockName: PIPELINE_GLOBAL_LOCK, ownerId });
   }
 
   const durationMs = Date.now() - startTime;

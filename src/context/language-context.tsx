@@ -14,10 +14,8 @@ const LanguageContext = createContext<LanguageContextType | undefined>(undefined
 
 export function LanguageProvider({ children }: { children: React.ReactNode }) {
   const [language, setLanguageState] = useState<Language>('bn');
-  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    setMounted(true);
     // 1. Read stored preference from localStorage
     try {
       const stored = localStorage.getItem('nakshatra_language') as Language | null;

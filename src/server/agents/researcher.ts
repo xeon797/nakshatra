@@ -149,7 +149,7 @@ export class MultiSourceResearcherAgent {
       id: `primary-${idx}`,
       url: ps.url,
       sourceName: ps.sourceName || 'Primary Lab Announcement',
-      sourceTier: (ps.sourceTier as any) || 'tier_1_primary',
+      sourceTier: (ps.sourceTier as SourceDocument['sourceTier']) || 'tier_1_primary',
       text: ps.text,
     }));
 

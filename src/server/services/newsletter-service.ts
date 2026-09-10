@@ -12,7 +12,7 @@ export const SubscribeSchema = z.object({
   preferredLanguage: z.enum(['en', 'bn']).default('bn'),
 });
 
-export type SubscribeInput = z.infer<typeof SubscribeSchema>;
+export type SubscribeInput = z.input<typeof SubscribeSchema>;
 
 export interface DailyDigestResult {
   success: boolean;
@@ -35,11 +35,22 @@ export function getDefaultFromEmail(): string {
     : 'NAKSHATRA Dispatch <onboarding@resend.dev>';
 }
 
+export interface ResendClientLike {
+  emails: {
+    send: (payload: {
+      from: string;
+      to: string;
+      subject: string;
+      html: string;
+    }) => Promise<unknown>;
+  };
+}
+
 export class NewsletterService {
-  private resendClient: Resend | null = null;
+  private resendClient: Resend | ResendClientLike | null = null;
   private isMock: boolean = false;
 
-  constructor(options?: { resendApiKey?: string; resendClient?: any }) {
+  constructor(options?: { resendApiKey?: string; resendClient?: Resend | ResendClientLike | null }) {
     if (options?.resendClient) {
       this.resendClient = options.resendClient;
       this.isMock = false;
@@ -223,7 +234,7 @@ export class NewsletterService {
     }
 
     const categoryHighlights = Object.entries(categoryMap)
-      .filter(([_, cat]) => cat.stories.length > 0)
+      .filter(([, cat]) => cat.stories.length > 0)
       .map(([category, cat]) => ({
         category,
         categoryLabel: cat.label,
@@ -334,8 +345,9 @@ export class NewsletterService {
               html: htmlContent,
             });
             result.emailsSent++;
-          } catch (err: any) {
-            result.errors.push(`Failed to send to ${sub.email}: ${err.message || String(err)}`);
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            result.errors.push(`Failed to send to ${sub.email}: ${message}`);
           }
         }
       }

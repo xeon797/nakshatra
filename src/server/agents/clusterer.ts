@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { getDb } from '../../db';
 import * as schema from '../../db/schema';
-import { eq, desc, gte, and, inArray } from 'drizzle-orm';
+import { eq, desc, gte } from 'drizzle-orm';
 import { AiModelProvider } from '../../services/ai/provider';
 import { getAiProvider } from '../../services/ai/factory';
 import { AgentAuditLogger } from '../../services/research/audit-logger';
@@ -169,7 +169,7 @@ export function hasHighRiskKeywords(text: string): boolean {
  */
 export function determineEditorialStatus(
   riskLevel: 'low' | 'medium' | 'high',
-  importanceScore: number
+  _importanceScore: number
 ): 'auto_approved' | 'needs_review' | 'rejected' {
   if (riskLevel === 'low') {
     // Official product documentation, verified arXiv papers, developer tool updates
@@ -481,14 +481,14 @@ Excerpt: ${c.summaryExcerpt || c.cleanText.substring(0, 300)}...`
         linkedArticleIds: matchingArticles.map((m) => m.id),
         primaryArticleId: primaryArticle.id,
       };
-    } catch (err: any) {
+    } catch (err) {
       if (runId) {
         await this.logger.finishRun(runId, {
           status: 'failed',
           promptTokens: 0,
           completionTokens: 0,
           latencyMs: Date.now() - startTime,
-          errorMessage: err.message || String(err),
+          errorMessage: err instanceof Error ? err.message : String(err),
         });
       }
       throw err;

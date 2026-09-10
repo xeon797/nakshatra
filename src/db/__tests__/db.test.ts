@@ -2,7 +2,6 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { getDb, resetDbForTesting } from '../index';
 import { initializeDatabase } from '../init';
 import * as schema from '../schema';
-import { eq } from 'drizzle-orm';
 
 describe('NAKSHATRA Database Schema & Layer', () => {
   beforeAll(async () => {

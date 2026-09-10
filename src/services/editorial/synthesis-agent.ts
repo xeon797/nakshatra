@@ -232,14 +232,14 @@ Generate the full synthesized article draft in JSON conforming strictly to the e
         runId,
         readingTimeMinutes,
       };
-    } catch (err: any) {
+    } catch (err) {
       if (runId) {
         await this.logger.finishRun(runId, {
           status: 'failed',
           promptTokens: 0,
           completionTokens: 0,
           latencyMs: Date.now() - startTime,
-          errorMessage: err.message || String(err),
+          errorMessage: err instanceof Error ? err.message : String(err),
         });
       }
       throw err;
@@ -408,14 +408,14 @@ Generate the full synthesized bilingual article draft in JSON conforming strictl
         runId,
         readingTimeMinutes,
       };
-    } catch (err: any) {
+    } catch (err) {
       if (runId) {
         await this.logger.finishRun(runId, {
           status: 'failed',
           promptTokens: 0,
           completionTokens: 0,
           latencyMs: Date.now() - startTime,
-          errorMessage: err.message || String(err),
+          errorMessage: err instanceof Error ? err.message : String(err),
         });
       }
       throw err;

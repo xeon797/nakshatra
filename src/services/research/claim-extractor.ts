@@ -107,14 +107,14 @@ Extract all atomic factual claims in strict JSON format.`;
       }));
 
       return { claims: mappedClaims, runId };
-    } catch (err: any) {
+    } catch (err) {
       if (runId) {
         await this.logger.finishRun(runId, {
           status: 'failed',
           promptTokens: 0,
           completionTokens: 0,
           latencyMs: Date.now() - startTime,
-          errorMessage: err.message || String(err),
+          errorMessage: err instanceof Error ? err.message : String(err),
         });
       }
       throw err;

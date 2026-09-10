@@ -13,9 +13,10 @@ export async function POST(
     await manager.approveArticle(id, 'editor_admin');
 
     return NextResponse.json({ success: true, message: 'Article approved and published' });
-  } catch (err: any) {
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Approval failed';
     return NextResponse.json(
-      { success: false, error: err.message || 'Approval failed' },
+      { success: false, error: message },
       { status: 500 }
     );
   }

@@ -1,7 +1,6 @@
-import { getDb, resetDbForTesting } from "../src/db/index.ts";
+import { getDb } from "../src/db/index.ts";
 import { initializeDatabase } from "../src/db/init.ts";
 import * as schema from "../src/db/schema.ts";
-import { eq } from "drizzle-orm";
 import { seedDefaultSources } from "../src/services/ingestion/seed-sources.ts";
 import { ArticleManager } from "../src/services/editorial/article-manager.ts";
 import { AgentAuditLogger } from "../src/services/research/audit-logger.ts";
@@ -13,20 +12,6 @@ async function main() {
   const db = await getDb();
   const manager = new ArticleManager();
   const logger = new AgentAuditLogger();
-
-  // 1. Fetch Google DeepMind source
-  const [sourceDeepMind] = await db
-    .select()
-    .from(schema.sources)
-    .where(eq(schema.sources.name, "Google DeepMind Research"))
-    .limit(1);
-
-  // 2. Fetch Anthropic source
-  const [sourceAnthropic] = await db
-    .select()
-    .from(schema.sources)
-    .where(eq(schema.sources.name, "Anthropic Research"))
-    .limit(1);
 
   console.log("?? Seeding Story 1: Claude 3.7 Sonnet Hybrid Reasoning (Published)...");
   const [cluster1] = await db

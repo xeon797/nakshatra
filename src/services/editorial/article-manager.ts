@@ -3,6 +3,21 @@ import * as schema from '../../db/schema';
 import { eq, desc, and } from 'drizzle-orm';
 import { SynthesisResult, VerifiedClaimInput } from './synthesis-agent';
 
+export interface BilingualDraftInput {
+  en?: {
+    title?: string;
+    summary?: string;
+    content?: string;
+    keyTakeaways?: string[];
+  };
+  bn?: {
+    title?: string;
+    summary?: string;
+    content?: string;
+    keyTakeaways?: string[];
+  };
+}
+
 export class ArticleManager {
   /**
    * Persists a synthesized draft article into PostgreSQL with citations and initial revision record
@@ -13,7 +28,7 @@ export class ArticleManager {
     storyId?: string;
     verifiedClaims: VerifiedClaimInput[];
     editorUserId?: string;
-    bilingualDraft?: any;
+    bilingualDraft?: BilingualDraftInput;
   }): Promise<typeof schema.articles.$inferSelect> {
     const db = await getDb();
     const { draft, plagiarismAudit, readingTimeMinutes } = params.synthesisResult;

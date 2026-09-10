@@ -1,6 +1,5 @@
 import React from 'react';
-import { DailyDigestEmailProps, EmailStoryItem } from './daily-digest';
-import { toBengaliDigits } from '../lib/i18n';
+import { DailyDigestEmailProps } from './daily-digest';
 
 function escapeHtml(str: string): string {
   if (!str) return '';

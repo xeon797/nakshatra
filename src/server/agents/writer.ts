@@ -106,6 +106,9 @@ export class MultiSourceWriterAgent {
           .update(schema.stories)
           .set({
             editorialStatus: 'published',
+            processingStatus: 'completed',
+            failureReason: null,
+            failureStage: null,
             lastUpdatedAt: new Date(),
           })
           .where(eq(schema.stories.id, story.id));
@@ -131,6 +134,9 @@ export class MultiSourceWriterAgent {
           .update(schema.stories)
           .set({
             editorialStatus: 'published',
+            processingStatus: 'completed',
+            failureReason: null,
+            failureStage: null,
             lastUpdatedAt: new Date(),
           })
           .where(eq(schema.stories.id, story.id));

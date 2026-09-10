@@ -11,23 +11,24 @@ async function withRetry<T>(
   while (true) {
     try {
       return await fn();
-    } catch (error: any) {
+    } catch (error: unknown) {
       attempt++;
+      const err = error as { status?: number; message?: string } | undefined;
       const isRetryable =
         attempt <= maxRetries &&
-        (error?.status === 429 ||
-          error?.status === 503 ||
-          error?.status === 500 ||
-          error?.status === 502 ||
-          error?.status === 504 ||
-          (typeof error?.message === 'string' &&
-            (error.message.includes('429') ||
-              error.message.includes('503') ||
-              error.message.includes('500') ||
-              error.message.includes('RESOURCE_EXHAUSTED') ||
-              error.message.includes('UNAVAILABLE') ||
-              error.message.includes('fetch failed') ||
-              error.message.includes('overloaded'))));
+        (err?.status === 429 ||
+          err?.status === 503 ||
+          err?.status === 500 ||
+          err?.status === 502 ||
+          err?.status === 504 ||
+          (typeof err?.message === 'string' &&
+            (err.message.includes('429') ||
+              err.message.includes('503') ||
+              err.message.includes('500') ||
+              err.message.includes('RESOURCE_EXHAUSTED') ||
+              err.message.includes('UNAVAILABLE') ||
+              err.message.includes('fetch failed') ||
+              err.message.includes('overloaded'))));
 
       if (!isRetryable) {
         throw error;
@@ -67,7 +68,7 @@ export class GeminiProvider implements AiModelProvider {
   private async executeGenerate(
     prompt: string,
     modelName: string,
-    config: any
+    config: Record<string, unknown>
   ) {
     const client = this.ensureClient();
     try {
@@ -76,20 +77,22 @@ export class GeminiProvider implements AiModelProvider {
         ...config,
       });
       return await withRetry(() => model.generateContent(prompt));
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const errorObj = err as { status?: number; message?: string } | undefined;
+      const errorMessage = errorObj?.message || String(err);
       // Automatic fallback if primary configured model encounters 503, 404, or 429 quota exhaustion
       if (
         modelName !== 'gemini-3.6-flash' &&
-        (err?.status === 503 ||
-          err?.status === 404 ||
-          err?.status === 429 ||
-          err?.message?.includes('503') ||
-          err?.message?.includes('404') ||
-          err?.message?.includes('429') ||
-          err?.message?.includes('Quota exceeded') ||
-          err?.message?.includes('RESOURCE_EXHAUSTED'))
+        (errorObj?.status === 503 ||
+          errorObj?.status === 404 ||
+          errorObj?.status === 429 ||
+          errorMessage.includes('503') ||
+          errorMessage.includes('404') ||
+          errorMessage.includes('429') ||
+          errorMessage.includes('Quota exceeded') ||
+          errorMessage.includes('RESOURCE_EXHAUSTED'))
       ) {
-        console.warn(`[GeminiProvider] Primary model "${modelName}" unavailable (${err.message}). Falling back to gemini-3.6-flash.`);
+        console.warn(`[GeminiProvider] Primary model "${modelName}" unavailable (${errorMessage}). Falling back to gemini-3.6-flash.`);
         const fallback = client.getGenerativeModel({
           model: 'gemini-3.6-flash',
           ...config,
@@ -139,12 +142,13 @@ export class GeminiProvider implements AiModelProvider {
     const rawText = result.response.text();
     const usage = result.response.usageMetadata;
 
-    let parsedJson: any;
+    let parsedJson: unknown;
     try {
       const cleanJson = rawText.replace(/```(?:json)?/gi, '').replace(/```/g, '').trim();
       parsedJson = JSON.parse(cleanJson);
-    } catch (err: any) {
-      throw new Error(`Failed to parse Gemini JSON output: ${err.message}. Raw text: ${rawText}`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      throw new Error(`Failed to parse Gemini JSON output: ${message}. Raw text: ${rawText}`);
     }
 
     const validated = schema.parse(parsedJson);

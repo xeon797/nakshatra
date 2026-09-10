@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { ExternalLink, ShieldCheck, ChevronDown, ChevronUp, Bookmark, Sparkles } from 'lucide-react';
+import { ExternalLink, ShieldCheck, ChevronDown, ChevronUp, Bookmark } from 'lucide-react';
 import { useLanguage } from '../../context/language-context';
 import { toBengaliDigits } from '../../lib/i18n';
 

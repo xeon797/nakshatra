@@ -57,7 +57,7 @@ export class PlagiarismDetector {
     const synthNGrams = this.extractNGrams(synthWords, this.nGramSize);
     let maxOverlapRatio = 0;
     const allOffendingPhrases: string[] = [];
-    let longestPhraseWords = 0;
+    const longestPhraseWords = 0;
 
     for (const sourceText of rawSourceTexts) {
       const sourceWords = this.tokenize(sourceText);

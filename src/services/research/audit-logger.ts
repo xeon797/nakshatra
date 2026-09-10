@@ -6,8 +6,8 @@ export interface LogStepOptions {
   agentRunId: string;
   stepNumber: number;
   actionName: string;
-  inputPayload: Record<string, any>;
-  outputPayload: Record<string, any>;
+  inputPayload: Record<string, unknown>;
+  outputPayload: Record<string, unknown>;
   rationale?: string;
 }
 

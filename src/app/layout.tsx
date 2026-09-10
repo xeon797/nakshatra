@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import './globals.css';
 import Link from 'next/link';
-import { Sparkles, Newspaper, ShieldCheck, Activity } from 'lucide-react';
+import { Newspaper, ShieldCheck, Activity } from 'lucide-react';
 import { Hind_Siliguri, Inter } from 'next/font/google';
 import { LanguageProvider } from '../context/language-context';
 import { LanguageToggle } from '../components/common/LanguageToggle';

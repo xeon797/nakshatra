@@ -15,6 +15,26 @@ export interface ParsedFeedItem {
   imageUrl?: string | null;
 }
 
+function extractMediaUrl(media: unknown): string | null {
+  if (!media) return null;
+  if (Array.isArray(media) && media.length > 0) {
+    return extractMediaUrl(media[0]);
+  }
+  if (typeof media === 'object' && media !== null) {
+    const obj = media as Record<string, unknown>;
+    if (typeof obj.url === 'string' && obj.url.trim().startsWith('https://')) {
+      return obj.url.trim();
+    }
+    if (obj.$ && typeof obj.$ === 'object' && obj.$ !== null) {
+      const dollar = obj.$ as Record<string, unknown>;
+      if (typeof dollar.url === 'string' && dollar.url.trim().startsWith('https://')) {
+        return dollar.url.trim();
+      }
+    }
+  }
+  return null;
+}
+
 export class RssFeedAdapter {
   private parser: Parser;
 
@@ -32,8 +52,9 @@ export class RssFeedAdapter {
     try {
       const feed = await this.parser.parseURL(feedUrl);
       return this.transformFeedItems(feed.items);
-    } catch (err: any) {
-      throw new Error(`Failed to parse RSS feed from ${feedUrl}: ${err?.message || err}`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      throw new Error(`Failed to parse RSS feed from ${feedUrl}: ${message}`);
     }
   }
 
@@ -41,8 +62,9 @@ export class RssFeedAdapter {
     try {
       const feed = await this.parser.parseString(xmlContent);
       return this.transformFeedItems(feed.items);
-    } catch (err: any) {
-      throw new Error(`Failed to parse RSS XML string: ${err?.message || err}`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      throw new Error(`Failed to parse RSS XML string: ${message}`);
     }
   }
 
@@ -55,8 +77,9 @@ export class RssFeedAdapter {
 
       const canonicalUrl = canonicalizeUrl(link);
       const title = (item.title || 'Untitled Update').trim();
-      const itemAny = item as Record<string, any>;
-      const rawHtml = itemAny['content:encoded'] || item.content || item.summary || '';
+      const itemRecord = item as Record<string, unknown>;
+      const encodedContent = typeof itemRecord['content:encoded'] === 'string' ? itemRecord['content:encoded'] : '';
+      const rawHtml = encodedContent || item.content || item.summary || '';
       const { cleanText, excerpt } = cleanHtml(rawHtml);
 
       // Fallback clean text if raw content was minimal
@@ -66,7 +89,7 @@ export class RssFeedAdapter {
 
       const authors: string[] = [];
       if (item.creator) authors.push(item.creator);
-      if (itemAny.author) authors.push(itemAny.author);
+      if (typeof itemRecord.author === 'string') authors.push(itemRecord.author);
 
       let publishedAt = new Date();
       if (item.pubDate) {
@@ -85,20 +108,12 @@ export class RssFeedAdapter {
         }
       }
 
-      if (!imageUrl && itemAny['media:content']) {
-        const mc = itemAny['media:content'];
-        const mUrl = mc?.$?.url || mc?.url || (Array.isArray(mc) ? mc[0]?.$?.url || mc[0]?.url : null);
-        if (typeof mUrl === 'string' && mUrl.trim().startsWith('https://')) {
-          imageUrl = mUrl.trim();
-        }
+      if (!imageUrl && itemRecord['media:content']) {
+        imageUrl = extractMediaUrl(itemRecord['media:content']);
       }
 
-      if (!imageUrl && itemAny['media:thumbnail']) {
-        const mt = itemAny['media:thumbnail'];
-        const tUrl = mt?.$?.url || mt?.url || (Array.isArray(mt) ? mt[0]?.$?.url || mt[0]?.url : null);
-        if (typeof tUrl === 'string' && tUrl.trim().startsWith('https://')) {
-          imageUrl = tUrl.trim();
-        }
+      if (!imageUrl && itemRecord['media:thumbnail']) {
+        imageUrl = extractMediaUrl(itemRecord['media:thumbnail']);
       }
 
       if (!imageUrl && rawHtml) {

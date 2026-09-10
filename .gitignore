@@ -1,4 +1,4 @@
-﻿# Dependencies
+# Dependencies
 /node_modules
 /.pnp
 .pnp.js
@@ -37,3 +37,6 @@ yarn-error.log*
 # OS
 .DS_Store
 Thumbs.db
+
+# TypeScript Build Info
+*.tsbuildinfo

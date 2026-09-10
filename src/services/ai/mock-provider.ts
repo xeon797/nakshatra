@@ -4,20 +4,20 @@ import { AiModelProvider, AiCallOptions, AiResponse, AiStructuredResponse } from
 export class MockAiProvider implements AiModelProvider {
   readonly providerName = 'mock_ai';
   readonly defaultModel = 'mock-gemini-2.5';
-  private mockStructuredQueue: any[] = [];
-  private mockStructuredResponse: any = null;
+  private mockStructuredQueue: unknown[] = [];
+  private mockStructuredResponse: unknown = null;
   private mockTextResponse: string = 'Mock response';
 
-  constructor(options?: { mockStructured?: any; mockText?: string }) {
+  constructor(options?: { mockStructured?: unknown; mockText?: string }) {
     if (options?.mockStructured) this.mockStructuredResponse = options.mockStructured;
     if (options?.mockText) this.mockTextResponse = options.mockText;
   }
 
-  enqueueStructuredResponse(data: any) {
+  enqueueStructuredResponse(data: unknown) {
     this.mockStructuredQueue.push(data);
   }
 
-  setMockStructuredResponse(data: any) {
+  setMockStructuredResponse(data: unknown) {
     this.mockStructuredResponse = data;
   }
 
@@ -35,7 +35,7 @@ export class MockAiProvider implements AiModelProvider {
     };
   }
 
-  private getFallbackTemplates(): any[] {
+  private getFallbackTemplates(): unknown[] {
     return [
       // SynthesizedArticleDraftSchema
       {
@@ -130,7 +130,7 @@ export class MockAiProvider implements AiModelProvider {
     schema: z.ZodType<T>,
     options?: AiCallOptions
   ): Promise<AiStructuredResponse<T>> {
-    let rawData: any;
+    let rawData: unknown;
     if (this.mockStructuredQueue.length > 0) {
       rawData = this.mockStructuredQueue.shift();
     } else if (this.mockStructuredResponse) {
@@ -150,34 +150,37 @@ export class MockAiProvider implements AiModelProvider {
     }
 
     // Bidirectional adapter: seamlessly support both single-language and bilingual draft mocks
-    if (rawData && rawData.title && rawData.contentMarkdown && !rawData.en) {
+    const rawObj = (rawData && typeof rawData === 'object' ? rawData : {}) as Record<string, unknown>;
+    const enObj = rawObj.en && typeof rawObj.en === 'object' ? (rawObj.en as Record<string, unknown>) : null;
+
+    if (rawObj.title && rawObj.contentMarkdown && !rawObj.en) {
       const testBilingual = schema.safeParse({
-        slug: rawData.slug || 'slug',
+        slug: rawObj.slug || 'slug',
         en: {
-          title: rawData.title,
-          summary: rawData.deck || rawData.title,
-          content: rawData.contentMarkdown,
-          keyTakeaways: [rawData.deck || rawData.title],
+          title: rawObj.title,
+          summary: rawObj.deck || rawObj.title,
+          content: rawObj.contentMarkdown,
+          keyTakeaways: [rawObj.deck || rawObj.title],
         },
         bn: {
-          title: rawData.title,
-          summary: rawData.deck || rawData.title,
-          content: rawData.contentMarkdown,
-          keyTakeaways: [rawData.deck || rawData.title],
+          title: rawObj.title,
+          summary: rawObj.deck || rawObj.title,
+          content: rawObj.contentMarkdown,
+          keyTakeaways: [rawObj.deck || rawObj.title],
         },
-        citations: rawData.citations || [],
+        citations: rawObj.citations || [],
       });
       if (testBilingual.success) {
         rawData = testBilingual.data;
       }
-    } else if (rawData && rawData.en && !rawData.title) {
+    } else if (enObj && !rawObj.title) {
       const testSingle = schema.safeParse({
-        title: rawData.en.title,
-        deck: rawData.en.summary,
-        slug: rawData.slug,
-        contentMarkdown: rawData.en.content,
-        metaDescription: rawData.en.summary,
-        citations: rawData.citations || [],
+        title: enObj.title,
+        deck: enObj.summary,
+        slug: rawObj.slug,
+        contentMarkdown: enObj.content,
+        metaDescription: enObj.summary,
+        citations: rawObj.citations || [],
       });
       if (testSingle.success) {
         rawData = testSingle.data;

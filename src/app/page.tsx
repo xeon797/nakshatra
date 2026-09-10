@@ -5,7 +5,7 @@ import { ensureDatabaseInitialized } from '../db/init';
 import { getDb } from '../db';
 import * as schema from '../db/schema';
 import { eq, gte, sql } from 'drizzle-orm';
-import { ShieldCheck, Mail, ArrowRight, Sparkles } from 'lucide-react';
+import { Sparkles } from 'lucide-react';
 import { PulseTicker } from '../components/home/PulseTicker';
 import { HeroStory } from '../components/home/HeroStory';
 import { NewsGridWithFilter, ArticleCardItem } from '../components/home/NewsGridWithFilter';

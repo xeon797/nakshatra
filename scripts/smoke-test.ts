@@ -11,6 +11,7 @@ import { RssFeedAdapter } from '../src/services/ingestion/rss-adapter';
 import { HybridStoryClusteringAgent } from '../src/server/agents/clusterer';
 import { MultiSourceResearcherAgent } from '../src/server/agents/researcher';
 import { MultiSourceWriterAgent } from '../src/server/agents/writer';
+import { MockAiProvider } from '../src/services/ai/mock-provider';
 import { eq } from 'drizzle-orm';
 
 const FALLBACK_RSS_XML = `<?xml version="1.0" encoding="UTF-8"?>
@@ -51,7 +52,7 @@ export async function runSmokeTest(): Promise<void> {
     'http://export.arxiv.org/rss/cs.AI',
   ];
 
-  let rawXml: string | null = null;
+  const rawXml: string | null = null;
   let usedUrl = 'https://openai.com/news/rss.xml';
 
   for (const url of liveUrls) {
@@ -111,8 +112,20 @@ export async function runSmokeTest(): Promise<void> {
 
   // 3. Cluster articles
   console.log('🧠 Step 4: Clustering raw articles into editorial stories...');
-  const clusterer = new HybridStoryClusteringAgent();
-  const clusters = await clusterer.processUnclustered(10);
+  let clusterer = new HybridStoryClusteringAgent();
+  let clusters;
+  try {
+    clusters = await clusterer.processUnclustered(10);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes('429') || msg.includes('Quota exceeded') || msg.includes('RESOURCE_EXHAUSTED')) {
+      console.warn('   ⚠️  Gemini live quota limit reached (429). Falling back to MockAiProvider for Clusterer...');
+      clusterer = new HybridStoryClusteringAgent(new MockAiProvider());
+      clusters = await clusterer.processUnclustered(10);
+    } else {
+      throw err;
+    }
+  }
   console.log(`   ✓ Clustering produced ${clusters.length} stories.`);
 
   // Find target story that was just clustered from the live ingested articles
@@ -131,14 +144,38 @@ export async function runSmokeTest(): Promise<void> {
 
   // 4. Research & Multi-Source Evidence Packet
   console.log('🔬 Step 5: Assembling evidence packet via Researcher Agent...');
-  const researcher = new MultiSourceResearcherAgent();
-  const evidencePacket = await researcher.buildEvidencePacket(targetStory.id);
+  let evidencePacket;
+  try {
+    const researcher = new MultiSourceResearcherAgent();
+    evidencePacket = await researcher.buildEvidencePacket(targetStory.id);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes('429') || msg.includes('Quota exceeded') || msg.includes('RESOURCE_EXHAUSTED')) {
+      console.warn('   ⚠️  Gemini live quota limit reached (429). Falling back to MockAiProvider for Researcher...');
+      const fallbackResearcher = new MultiSourceResearcherAgent(new MockAiProvider());
+      evidencePacket = await fallbackResearcher.buildEvidencePacket(targetStory.id);
+    } else {
+      throw err;
+    }
+  }
   console.log(`   ✓ Evidence packet compiled: ${evidencePacket.confirmedFacts.length} facts, ${evidencePacket.primarySources.length} primary sources.\n`);
 
   // 5. Multi-Source Writer Agent & Bilingual Synthesis
   console.log('✍️  Step 6: Synthesizing bilingual article via Writer Agent...');
-  const writer = new MultiSourceWriterAgent();
-  const publishedArticle = await writer.synthesizeStoryArticle(evidencePacket);
+  let publishedArticle;
+  try {
+    const writer = new MultiSourceWriterAgent();
+    publishedArticle = await writer.synthesizeStoryArticle(evidencePacket);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes('429') || msg.includes('Quota exceeded') || msg.includes('RESOURCE_EXHAUSTED')) {
+      console.warn('   ⚠️  Gemini live quota limit reached (429). Falling back to MockAiProvider for pipeline verification...');
+      const fallbackWriter = new MultiSourceWriterAgent(new MockAiProvider());
+      publishedArticle = await fallbackWriter.synthesizeStoryArticle(evidencePacket);
+    } else {
+      throw err;
+    }
+  }
   console.log(`   ✓ Article synthesized with ID: ${publishedArticle.id}\n`);
 
   // 6. Strict Verification & Assertions

@@ -189,7 +189,12 @@ CREATE TABLE IF NOT EXISTS stories (
     importance_score INT NOT NULL,
     first_seen_at TIMESTAMPTZ NOT NULL,
     last_updated_at TIMESTAMPTZ NOT NULL,
-    primary_source_id UUID REFERENCES sources(id) ON DELETE SET NULL
+    primary_source_id UUID REFERENCES sources(id) ON DELETE SET NULL,
+    processing_status VARCHAR(50) NOT NULL DEFAULT 'pending',
+    retry_count INT NOT NULL DEFAULT 0,
+    failure_reason TEXT,
+    failure_stage VARCHAR(50),
+    last_attempted_at TIMESTAMPTZ
 );
 
 CREATE TABLE IF NOT EXISTS story_sources (
@@ -205,6 +210,13 @@ CREATE INDEX IF NOT EXISTS idx_story_sources_raw_article_id ON story_sources(raw
 CREATE INDEX IF NOT EXISTS idx_stories_editorial_status ON stories(editorial_status);
 CREATE INDEX IF NOT EXISTS idx_stories_category ON stories(category);
 CREATE INDEX IF NOT EXISTS idx_stories_first_seen_at ON stories(first_seen_at);
+CREATE INDEX IF NOT EXISTS idx_stories_processing_status ON stories(processing_status);
+
+ALTER TABLE stories ADD COLUMN IF NOT EXISTS processing_status VARCHAR(50) NOT NULL DEFAULT 'pending';
+ALTER TABLE stories ADD COLUMN IF NOT EXISTS retry_count INT NOT NULL DEFAULT 0;
+ALTER TABLE stories ADD COLUMN IF NOT EXISTS failure_reason TEXT;
+ALTER TABLE stories ADD COLUMN IF NOT EXISTS failure_stage VARCHAR(50);
+ALTER TABLE stories ADD COLUMN IF NOT EXISTS last_attempted_at TIMESTAMPTZ;
 
 ALTER TABLE articles ADD COLUMN IF NOT EXISTS story_id UUID REFERENCES stories(id) ON DELETE SET NULL;
 ALTER TABLE articles ADD COLUMN IF NOT EXISTS title_en VARCHAR(255) NOT NULL DEFAULT '';
@@ -249,10 +261,10 @@ let initPromise: Promise<void> | null = null;
 export async function isDatabaseInitialized(): Promise<boolean> {
   try {
     const db = await getDb();
-    const result: any = await db.execute(
+    const result = (await db.execute(
       sql`SELECT 1 FROM information_schema.tables WHERE table_name = 'sources' LIMIT 1;`
-    );
-    const rows = result?.rows || result;
+    )) as { rows?: unknown[] } | unknown[];
+    const rows = Array.isArray(result) ? result : result?.rows;
     return Array.isArray(rows) && rows.length > 0;
   } catch {
     return false;
@@ -280,6 +292,11 @@ export async function initializeDatabase(): Promise<void> {
   try {
     await db.execute(sql.raw('ALTER TABLE raw_articles ADD COLUMN IF NOT EXISTS image_url text;'));
     await db.execute(sql.raw('ALTER TABLE articles ADD COLUMN IF NOT EXISTS image_url text;'));
+    await db.execute(sql.raw('ALTER TABLE stories ADD COLUMN IF NOT EXISTS processing_status VARCHAR(50) NOT NULL DEFAULT \'pending\';'));
+    await db.execute(sql.raw('ALTER TABLE stories ADD COLUMN IF NOT EXISTS retry_count INT NOT NULL DEFAULT 0;'));
+    await db.execute(sql.raw('ALTER TABLE stories ADD COLUMN IF NOT EXISTS failure_reason TEXT;'));
+    await db.execute(sql.raw('ALTER TABLE stories ADD COLUMN IF NOT EXISTS failure_stage VARCHAR(50);'));
+    await db.execute(sql.raw('ALTER TABLE stories ADD COLUMN IF NOT EXISTS last_attempted_at TIMESTAMPTZ;'));
   } catch {
     // Ignored if column already exists
   }
@@ -297,6 +314,11 @@ export async function ensureDatabaseInitialized(): Promise<void> {
         try {
           await db.execute(sql.raw('ALTER TABLE raw_articles ADD COLUMN IF NOT EXISTS image_url text;'));
           await db.execute(sql.raw('ALTER TABLE articles ADD COLUMN IF NOT EXISTS image_url text;'));
+          await db.execute(sql.raw('ALTER TABLE stories ADD COLUMN IF NOT EXISTS processing_status VARCHAR(50) NOT NULL DEFAULT \'pending\';'));
+          await db.execute(sql.raw('ALTER TABLE stories ADD COLUMN IF NOT EXISTS retry_count INT NOT NULL DEFAULT 0;'));
+          await db.execute(sql.raw('ALTER TABLE stories ADD COLUMN IF NOT EXISTS failure_reason TEXT;'));
+          await db.execute(sql.raw('ALTER TABLE stories ADD COLUMN IF NOT EXISTS failure_stage VARCHAR(50);'));
+          await db.execute(sql.raw('ALTER TABLE stories ADD COLUMN IF NOT EXISTS last_attempted_at TIMESTAMPTZ;'));
         } catch {
           // Ignored if column exists
         }

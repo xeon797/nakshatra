@@ -256,14 +256,14 @@ Determine whether the source SUPPORTS, REFUTES, or is INCONCLUSIVE regarding the
       }
 
       return outcomes;
-    } catch (err: any) {
+    } catch (err) {
       if (runId) {
         await this.logger.finishRun(runId, {
           status: 'failed',
           promptTokens: totalPromptTokens,
           completionTokens: totalCompletionTokens,
           latencyMs: Date.now() - startTime,
-          errorMessage: err.message || String(err),
+          errorMessage: err instanceof Error ? err.message : String(err),
         });
       }
       throw err;

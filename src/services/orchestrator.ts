@@ -101,7 +101,7 @@ export class AutonomousNewsroomOrchestrator {
           id: source.id,
           url: rawArticle.canonicalUrl,
           sourceName: source.name,
-          sourceTier: (source.tier as any) || 'tier_2_verified',
+          sourceTier: (source.tier as SourceDocument['sourceTier']) || 'tier_2_verified',
           text: rawArticle.cleanText,
         };
 
@@ -180,8 +180,9 @@ export class AutonomousNewsroomOrchestrator {
 
         report.draftsGenerated++;
         report.articleIds.push(savedDraft.id);
-      } catch (err: any) {
-        report.failures.push(`Failed processing "${rawArticle.title}": ${err.message}`);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        report.failures.push(`Failed processing "${rawArticle.title}": ${message}`);
       }
     }
 

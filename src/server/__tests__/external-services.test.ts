@@ -240,6 +240,7 @@ describe('External Service Integration Hardening (Resend, Jina Reader, Tavily)',
           topics: ['all'],
           isActive: true,
           isVerified: true,
+          verificationToken: null,
           unsubscribedAt: null,
           createdAt: new Date(),
           updatedAt: new Date(),
@@ -251,6 +252,7 @@ describe('External Service Integration Hardening (Resend, Jina Reader, Tavily)',
           topics: ['all'],
           isActive: true,
           isVerified: true,
+          verificationToken: null,
           unsubscribedAt: null,
           createdAt: new Date(),
           updatedAt: new Date(),
@@ -308,16 +310,16 @@ describe('External Service Integration Hardening (Resend, Jina Reader, Tavily)',
       const originalFrom = process.env.NEWSLETTER_FROM_EMAIL;
 
       delete process.env.NEWSLETTER_FROM_EMAIL;
-      process.env.NODE_ENV = 'production';
+      (process.env as any).NODE_ENV = 'production';
       expect(getDefaultFromEmail()).toBe('NAKSHATRA Dispatch <newsletter@nakshatra.news>');
 
-      process.env.NODE_ENV = 'test';
+      (process.env as any).NODE_ENV = 'test';
       expect(getDefaultFromEmail()).toBe('NAKSHATRA Dispatch <onboarding@resend.dev>');
 
       process.env.NEWSLETTER_FROM_EMAIL = 'custom@nakshatra.ai';
       expect(getDefaultFromEmail()).toBe('custom@nakshatra.ai');
 
-      process.env.NODE_ENV = originalEnv;
+      (process.env as any).NODE_ENV = originalEnv;
       process.env.NEWSLETTER_FROM_EMAIL = originalFrom;
     });
   });

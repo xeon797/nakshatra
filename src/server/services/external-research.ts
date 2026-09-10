@@ -41,7 +41,7 @@ const HIGH_SIGNAL_TECH_DOMAINS = [
 export function cleanExtractedMarkdown(rawMarkdown: string): string {
   if (!rawMarkdown) return '';
 
-  let cleaned = rawMarkdown
+  const cleaned = rawMarkdown
     // Remove raw scripts and styles
     .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
     .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '')
@@ -241,10 +241,12 @@ export async function searchSecondarySources(
       return [];
     }
 
-    const data: any = await response.json();
+    const data = (await response.json()) as {
+      results?: Array<{ title?: string; url?: string; content?: string; score?: number }>;
+    };
     const rawResults = Array.isArray(data?.results) ? data.results : [];
 
-    return rawResults.map((item: any) => ({
+    return rawResults.map((item) => ({
       title: String(item.title || '').trim(),
       url: String(item.url || '').trim(),
       content: cleanExtractedMarkdown(String(item.content || '').trim()),

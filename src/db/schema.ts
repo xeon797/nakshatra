@@ -277,11 +277,17 @@ export const stories = pgTable(
     firstSeenAt: timestamp('first_seen_at', { withTimezone: true }).notNull(),
     lastUpdatedAt: timestamp('last_updated_at', { withTimezone: true }).notNull(),
     primarySourceId: uuid('primary_source_id').references(() => sources.id, { onDelete: 'set null' }),
+    processingStatus: varchar('processing_status', { length: 50 }).notNull().default('pending'),
+    retryCount: integer('retry_count').notNull().default(0),
+    failureReason: text('failure_reason'),
+    failureStage: varchar('failure_stage', { length: 50 }),
+    lastAttemptedAt: timestamp('last_attempted_at', { withTimezone: true }),
   },
   (table) => [
     index('idx_stories_editorial_status').on(table.editorialStatus),
     index('idx_stories_category').on(table.category),
     index('idx_stories_first_seen_at').on(table.firstSeenAt),
+    index('idx_stories_processing_status').on(table.processingStatus),
   ]
 );
 

@@ -6,6 +6,17 @@ import { IngestionService } from '../services/ingestion/ingest-service';
 import { HybridStoryClusteringAgent, ClusteredStoryResult } from './agents/clusterer';
 import { MultiSourceResearcherAgent } from './agents/researcher';
 import { MultiSourceWriterAgent } from './agents/writer';
+import {
+  classifyError,
+  isStoryEligibleForRetry,
+  getMaxRetriesFromEnv,
+  FailureStage,
+} from './lib/retry-policy';
+import {
+  acquirePipelineLock,
+  releasePipelineLock,
+  PIPELINE_GLOBAL_LOCK,
+} from './lib/pipeline-lock';
 
 export interface Phase2WorkerRunSummary {
   sourcesPolled: number;
@@ -14,6 +25,11 @@ export interface Phase2WorkerRunSummary {
   clustersCreated: number;
   autoApprovedArticlesPublished: number;
   errors: string[];
+}
+
+export interface Phase2WorkerRunOptions {
+  forceAllSources?: boolean;
+  maxRetries?: number;
 }
 
 // Global in-process execution lock to prevent concurrent clusterer runs
@@ -43,7 +59,7 @@ export class AutonomousPhase2Worker {
    * Step 2: Run Clusterer.processUnclustered() with execution lock
    * Step 3: Trigger Writer/FactChecker on stories where editorial_status == 'auto_approved'
    */
-  async runCycle(): Promise<Phase2WorkerRunSummary> {
+  async runCycle(options?: Phase2WorkerRunOptions): Promise<Phase2WorkerRunSummary> {
     await ensureDatabaseInitialized();
     const db = await getDb();
 
@@ -71,7 +87,7 @@ export class AutonomousPhase2Worker {
       const lastPolled = source.lastPolledAt ? new Date(source.lastPolledAt).getTime() : 0;
       const pollingIntervalMs = (source.pollingFrequencyMinutes || 15) * 60 * 1000;
 
-      if (lastPolled > 0 && now - lastPolled < pollingIntervalMs) {
+      if (!options?.forceAllSources && lastPolled > 0 && now - lastPolled < pollingIntervalMs) {
         continue;
       }
 
@@ -82,8 +98,9 @@ export class AutonomousPhase2Worker {
         if (ingestResult.errors.length > 0) {
           summary.errors.push(...ingestResult.errors);
         }
-      } catch (err: any) {
-        summary.errors.push(`Failed ingestion for ${source.name}: ${err.message || String(err)}`);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        summary.errors.push(`Failed ingestion for ${source.name}: ${message}`);
       }
     }
 
@@ -96,8 +113,9 @@ export class AutonomousPhase2Worker {
       try {
         newClusters = await this.clusterer.processUnclustered(36);
         summary.clustersCreated = newClusters.length;
-      } catch (err: any) {
-        summary.errors.push(`Clustering pipeline error: ${err.message || String(err)}`);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        summary.errors.push(`Clustering pipeline error: ${message}`);
       } finally {
         isClusteringLocked = false;
       }
@@ -109,24 +127,93 @@ export class AutonomousPhase2Worker {
     // Step 3: Trigger Writer & Fact-Checker on stories where editorial_status == 'auto_approved'
     // ─────────────────────────────────────────────────────────────────────────
     try {
+      const maxRetries = options?.maxRetries ?? getMaxRetriesFromEnv();
       const autoApprovedStories = await db
         .select()
         .from(schema.stories)
         .where(eq(schema.stories.editorialStatus, 'auto_approved'));
 
+      let rateLimitEncountered = false;
+
       for (const story of autoApprovedStories) {
+        if (rateLimitEncountered) {
+          summary.errors.push(
+            `Rate limit active: deferred story "${story.title}" to protect API quota.`
+          );
+          break;
+        }
+
+        if (!isStoryEligibleForRetry(story, maxRetries)) {
+          continue;
+        }
+
+        // Transition to 'processing'
+        await db
+          .update(schema.stories)
+          .set({
+            processingStatus: 'processing',
+            lastAttemptedAt: new Date(),
+            lastUpdatedAt: new Date(),
+          })
+          .where(eq(schema.stories.id, story.id));
+
+        let currentStage: FailureStage = 'research';
+
         try {
           const evidencePacket = await this.researcher.buildEvidencePacket(story.id);
+          currentStage = 'writing';
           await this.writer.synthesizeStoryArticle(evidencePacket);
+
+          // Mark story completed and published
+          await db
+            .update(schema.stories)
+            .set({
+              editorialStatus: 'published',
+              processingStatus: 'completed',
+              failureReason: null,
+              failureStage: null,
+              lastUpdatedAt: new Date(),
+            })
+            .where(eq(schema.stories.id, story.id));
+
           summary.autoApprovedArticlesPublished++;
-        } catch (err: any) {
+        } catch (err) {
+          const classification = classifyError(err);
+          const currentRetries = story.retryCount || 0;
+          const nextRetryCount = currentRetries + 1;
+          const isExhausted = nextRetryCount >= maxRetries;
+          const isFinal = !classification.isRetryable || isExhausted;
+
+          if (classification.isRateLimit) {
+            rateLimitEncountered = true;
+          }
+
+          // If non-retryable or max retries exceeded:
+          // Move editorial_status to 'needs_review' so automatic execution stops forever
+          // and the story is queryable/visible by newsroom editors for manual intervention.
+          // Otherwise keep 'auto_approved' but mark processing_status 'failed' with backoff.
+          await db
+            .update(schema.stories)
+            .set({
+              editorialStatus: isFinal ? 'needs_review' : 'auto_approved',
+              processingStatus: 'failed',
+              retryCount: nextRetryCount,
+              failureReason: classification.reason,
+              failureStage: currentStage,
+              lastAttemptedAt: new Date(),
+              lastUpdatedAt: new Date(),
+            })
+            .where(eq(schema.stories.id, story.id));
+
+          const message = err instanceof Error ? err.message : String(err);
           summary.errors.push(
-            `Failed autonomous article generation for story "${story.title}": ${err.message || String(err)}`
+            `Story "${story.title}" failed at stage [${currentStage}] (attempt ${nextRetryCount}/${maxRetries}, retryable: ${classification.isRetryable}): ${message}`
           );
         }
       }
-    } catch (err: any) {
-      summary.errors.push(`Step 3 dispatch error: ${err.message || String(err)}`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      summary.errors.push(`Step 3 dispatch error: ${message}`);
     }
 
     return summary;
@@ -155,11 +242,23 @@ export async function startPhase2Daemon(options?: {
 
   while (isRunning) {
     try {
-      const summary = await worker.runCycle();
-      console.log(
-        `[NAKSHATRA Worker] Sources due: ${summary.sourcesProcessed}/${summary.sourcesPolled} | Ingested: ${summary.rawArticlesIngested} | Clusters: ${summary.clustersCreated} | Published: ${summary.autoApprovedArticlesPublished} | Errors: ${summary.errors.length}`
-      );
-    } catch (err: any) {
+      const db = await getDb();
+      const ownerId = `daemon-${process.pid || 'worker'}-${Date.now()}`;
+      const lockAcquired = await acquirePipelineLock(db, { lockName: PIPELINE_GLOBAL_LOCK, ownerId });
+
+      if (!lockAcquired) {
+        console.log('[Worker] Pipeline locked by another process; skipping this interval.');
+      } else {
+        try {
+          const summary = await worker.runCycle();
+          console.log(
+            `[NAKSHATRA Worker] Sources due: ${summary.sourcesProcessed}/${summary.sourcesPolled} | Ingested: ${summary.rawArticlesIngested} | Clusters: ${summary.clustersCreated} | Published: ${summary.autoApprovedArticlesPublished} | Errors: ${summary.errors.length}`
+          );
+        } finally {
+          await releasePipelineLock(db, { lockName: PIPELINE_GLOBAL_LOCK, ownerId });
+        }
+      }
+    } catch (err) {
       console.error('[NAKSHATRA Worker Fatal]', err);
     }
 

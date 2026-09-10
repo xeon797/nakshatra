@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { canonicalizeUrl, cleanHtml } from '../cleaner';
 import { generateContentHash, computeSimHash, hammingDistance, isNearDuplicate } from '../dedup';
-import { RssFeedAdapter } from '../rss-adapter';
 import { IngestionService } from '../ingest-service';
 import { getDb, resetDbForTesting } from '../../../db';
 import { initializeDatabase } from '../../../db/init';
