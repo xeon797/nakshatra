@@ -19,7 +19,12 @@ export async function handlePipelineCron(req: Request, workerInstance?: Autonomo
   const db = await getDb();
   const ownerId = `cron-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
 
-  const lockAcquired = await acquirePipelineLock(db, { lockName: PIPELINE_GLOBAL_LOCK, ownerId });
+  // Safe 90s lease prevents stalled locks if a serverless container terminates abruptly
+  const lockAcquired = await acquirePipelineLock(db, {
+    lockName: PIPELINE_GLOBAL_LOCK,
+    ownerId,
+    leaseMs: 90000,
+  });
   if (!lockAcquired) {
     return NextResponse.json(
       { status: 'skipped', reason: 'job_already_running' },
@@ -33,15 +38,38 @@ export async function handlePipelineCron(req: Request, workerInstance?: Autonomo
   let errorMessage: string | null = null;
 
   try {
+    let url: URL | null = null;
+    try {
+      url = new URL(req.url);
+    } catch {
+      // ignore
+    }
+
+    const paramBatch = url?.searchParams.get('batchSize');
+    const paramBudget = url?.searchParams.get('geminiBudget');
+    const skipIngest = url?.searchParams.get('skipIngestion') === 'true';
+    const forceAll = url?.searchParams.get('forceAllSources') === 'true';
+
     const worker = workerInstance || new AutonomousPhase2Worker();
-    const batchSize = process.env.CRON_BATCH_SIZE ? parseInt(process.env.CRON_BATCH_SIZE, 10) : 3;
-    const geminiBudget = process.env.CRON_GEMINI_BUDGET ? parseInt(process.env.CRON_GEMINI_BUDGET, 10) : 4;
-    const maxRuntimeMs = 50000; // 50s safe for serverless
+    const batchSize = paramBatch
+      ? parseInt(paramBatch, 10)
+      : process.env.CRON_BATCH_SIZE
+      ? parseInt(process.env.CRON_BATCH_SIZE, 10)
+      : 2;
+    const geminiBudget = paramBudget
+      ? parseInt(paramBudget, 10)
+      : process.env.CRON_GEMINI_BUDGET
+      ? parseInt(process.env.CRON_GEMINI_BUDGET, 10)
+      : 2;
+    const maxRuntimeMs = 25000; // 25s safe for serverless invocation limits
 
     workerSummary = await worker.runCycle({
       batchSize,
       geminiBudget,
       maxRuntimeMs,
+      maxSourcesToIngest: forceAll ? undefined : 2,
+      skipIngestion: skipIngest,
+      forceAllSources: forceAll,
     });
 
     if (workerSummary.errors.length > 0) {

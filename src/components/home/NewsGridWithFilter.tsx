@@ -1,9 +1,9 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
-import { Search, ShieldCheck, Clock, ArrowRight, Layers, AlertTriangle, ShieldAlert } from 'lucide-react';
+import { Search, ShieldCheck, Clock, ArrowRight, Layers, AlertTriangle, ShieldAlert, ChevronDown, Loader2 } from 'lucide-react';
 import { useLanguage } from '../../context/language-context';
 import { toBengaliDigits, formatReadingTime } from '../../lib/i18n';
 import { BroadsheetImagePlaceholder } from '../brand/BroadsheetImagePlaceholder';
@@ -26,12 +26,19 @@ export interface ArticleCardItem {
   imageUrl?: string | null;
 }
 
-export function NewsGridWithFilter({ articles }: NewsGridWithFilterProps) {
+export function NewsGridWithFilter({ articles, totalAvailable }: NewsGridWithFilterProps) {
   const { language, t } = useLanguage();
   const isBn = language === 'bn';
 
+  const [items, setItems] = useState<ArticleCardItem[]>(articles);
+  const [visibleCount, setVisibleCount] = useState(12);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [selectedTopic, setSelectedTopic] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
+
+  useEffect(() => {
+    setItems(articles);
+  }, [articles]);
 
   const topicTabs = [
     { id: 'all', label: t.allStories },
@@ -84,7 +91,7 @@ export function NewsGridWithFilter({ articles }: NewsGridWithFilterProps) {
   };
 
   const filteredArticles = useMemo(() => {
-    return articles.filter((article) => {
+    return items.filter((article) => {
       // Category match
       const matchesCategory = selectedTopic === 'all' || article.category === selectedTopic;
 
@@ -107,7 +114,38 @@ export function NewsGridWithFilter({ articles }: NewsGridWithFilterProps) {
 
       return searchableText.includes(query);
     });
-  }, [articles, selectedTopic, searchQuery]);
+  }, [items, selectedTopic, searchQuery]);
+
+  const visibleArticles = useMemo(() => {
+    return filteredArticles.slice(0, visibleCount);
+  }, [filteredArticles, visibleCount]);
+
+  const canLoadMoreFromClient = filteredArticles.length > visibleCount;
+  const canLoadMoreFromServer = totalAvailable !== undefined && items.length < totalAvailable;
+  const hasMore = canLoadMoreFromClient || canLoadMoreFromServer;
+
+  const handleLoadMore = async () => {
+    if (canLoadMoreFromClient) {
+      setVisibleCount((prev) => prev + 12);
+      return;
+    }
+
+    if (canLoadMoreFromServer) {
+      setIsLoadingMore(true);
+      try {
+        const res = await fetch(`/api/articles?offset=${items.length}&limit=12`);
+        const data = await res.json();
+        if (data.success && Array.isArray(data.articles) && data.articles.length > 0) {
+          setItems((prev) => [...prev, ...data.articles]);
+          setVisibleCount((prev) => prev + 12);
+        }
+      } catch (err) {
+        console.error('[NewsGridWithFilter] Failed to fetch more articles:', err);
+      } finally {
+        setIsLoadingMore(false);
+      }
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -165,8 +203,9 @@ export function NewsGridWithFilter({ articles }: NewsGridWithFilterProps) {
         <span className={isBn ? 'font-bengali' : ''}>
           {t.showingCount}{' '}
           <strong className="text-[#120424] font-mono">
-            {isBn ? toBengaliDigits(filteredArticles.length) : filteredArticles.length}
+            {isBn ? toBengaliDigits(visibleArticles.length) : visibleArticles.length}
           </strong>{' '}
+          / {isBn ? toBengaliDigits(totalAvailable || filteredArticles.length) : (totalAvailable || filteredArticles.length)}{' '}
           {t.totalVerifiedStories}
         </span>
         {searchQuery && (
@@ -200,7 +239,7 @@ export function NewsGridWithFilter({ articles }: NewsGridWithFilterProps) {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredArticles.map((article) => {
+          {visibleArticles.map((article) => {
             const categoryBadge = getCategoryBadge(article.category);
             const riskBadge = getRiskBadge(article.riskLevel);
             const RiskIcon = riskBadge.icon;
@@ -325,10 +364,44 @@ export function NewsGridWithFilter({ articles }: NewsGridWithFilterProps) {
           })}
         </div>
       )}
+
+      {/* Progressive Broadsheet Load More / Pagination */}
+      {hasMore && filteredArticles.length > 0 && (
+        <div className="pt-6 flex flex-col items-center justify-center gap-2 border-t border-[#d9d9d9]">
+          <button
+            onClick={handleLoadMore}
+            disabled={isLoadingMore}
+            className="inline-flex items-center gap-2 px-8 py-3 bg-[#1e0a3c] hover:bg-[#120424] text-white text-xs font-bold font-display uppercase tracking-widest transition-all disabled:opacity-50 border border-[#1e0a3c]"
+            style={{ borderRadius: 0 }}
+          >
+            {isLoadingMore ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin text-[#d91b74]" />
+                <span className={isBn ? 'font-bengali' : ''}>
+                  {isBn ? 'লোড হচ্ছে...' : 'Loading Dispatches...'}
+                </span>
+              </>
+            ) : (
+              <>
+                <span className={isBn ? 'font-bengali' : ''}>
+                  {isBn ? 'আরও প্রতিবেদন লোড করুন' : 'Load More Dispatches'}
+                </span>
+                <ChevronDown className="w-4 h-4" />
+              </>
+            )}
+          </button>
+          <span className={`text-[11px] font-mono text-[#6e6e6e] ${isBn ? 'font-bengali' : ''}`}>
+            {isBn
+              ? `প্রদর্শিত: ${toBengaliDigits(visibleArticles.length)} / ${toBengaliDigits(totalAvailable || filteredArticles.length)} টি প্রতিবেদন`
+              : `Showing ${visibleArticles.length} of ${totalAvailable || filteredArticles.length} verified reports`}
+          </span>
+        </div>
+      )}
     </div>
   );
 }
 
-interface NewsGridWithFilterProps {
+export interface NewsGridWithFilterProps {
   articles: ArticleCardItem[];
+  totalAvailable?: number;
 }

@@ -24,6 +24,7 @@ import {
   DEFAULT_WORKER_BATCH_SIZE,
   DEFAULT_STALE_JOB_THRESHOLD_MS,
 } from './lib/story-queue';
+import { revalidatePublishedContent } from '../lib/revalidation';
 
 export interface Phase2WorkerRunSummary {
   runId: string;
@@ -64,6 +65,7 @@ export interface Phase2WorkerRunOptions {
   maxRuntimeMs?: number;
   staleJobThresholdMs?: number;
   skipIngestion?: boolean;
+  maxSourcesToIngest?: number;
   skipClustering?: boolean;
   deterministicEvidence?: boolean;
 }
@@ -160,6 +162,13 @@ export class AutonomousPhase2Worker {
       const now = Date.now();
 
       for (const source of activeSources) {
+        if (
+          options?.maxSourcesToIngest !== undefined &&
+          summary.sourcesProcessed >= options.maxSourcesToIngest
+        ) {
+          break;
+        }
+
         const lastPolled = source.lastPolledAt ? new Date(source.lastPolledAt).getTime() : 0;
         const pollingIntervalMs = (source.pollingFrequencyMinutes || 15) * 60 * 1000;
 
@@ -289,6 +298,7 @@ export class AutonomousPhase2Worker {
 
           if (savedArticle.status === 'published') {
             summary.autoApprovedArticlesPublished++;
+            await revalidatePublishedContent(savedArticle.slug);
           }
         } catch (err) {
           const classification = classifyError(err);

@@ -1,7 +1,8 @@
 import { getDb } from '../../db';
 import * as schema from '../../db/schema';
-import { eq, desc, and } from 'drizzle-orm';
+import { eq, desc, and, sql } from 'drizzle-orm';
 import { SynthesisResult, VerifiedClaimInput } from './synthesis-agent';
+import { revalidatePublishedContent } from '../../lib/revalidation';
 
 export interface BilingualDraftInput {
   en?: {
@@ -250,6 +251,10 @@ export class ArticleManager {
       });
     }
 
+    if (savedArticle.status === 'published') {
+      await revalidatePublishedContent(savedArticle.slug);
+    }
+
     return savedArticle;
   }
 
@@ -286,6 +291,22 @@ export class ArticleManager {
       diffSummary: 'Approved and published to public feed.',
       previousContent: '',
     });
+
+    if (article?.slug) {
+      await revalidatePublishedContent(article.slug);
+    }
+  }
+
+  /**
+   * Returns total count of published articles in database
+   */
+  async countPublishedArticles(): Promise<number> {
+    const db = await getDb();
+    const [row] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(schema.articles)
+      .where(eq(schema.articles.status, 'published'));
+    return row?.count ?? 0;
   }
 
   /**

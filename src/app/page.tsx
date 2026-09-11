@@ -18,6 +18,7 @@ export const dynamic = 'force-dynamic';
 export default async function HomePage() {
   let activeSourcesCount = 12;
   let storiesIngestedToday = 0;
+  let totalPublishedCount = 0;
   let rawPublishedArticles: Awaited<ReturnType<ArticleManager['getPublishedArticlesWithMetadata']>> = [];
 
   try {
@@ -41,14 +42,15 @@ export default async function HomePage() {
     activeSourcesCount = Number(activeSourcesRow?.count || 12);
     storiesIngestedToday = Number(ingestedTodayRow?.count || 0);
 
-    // 2. Fetch published articles with story and source metadata
+    // 2. Fetch initial 12 published articles with story and source metadata + total count
     const articleManager = new ArticleManager();
-    rawPublishedArticles = await articleManager.getPublishedArticlesWithMetadata(40, 0);
+    totalPublishedCount = await articleManager.countPublishedArticles();
+    rawPublishedArticles = await articleManager.getPublishedArticlesWithMetadata(12, 0);
   } catch (err) {
     console.error('[HomePage] Database query failed, rendering resilient fallback:', err);
   }
 
-  const articlesPublishedCount = rawPublishedArticles.length;
+  const articlesPublishedCount = totalPublishedCount || rawPublishedArticles.length;
 
   // Format articles for client card display with bilingual properties
   const formattedArticles: ArticleCardItem[] = rawPublishedArticles.map((a) => ({
@@ -137,7 +139,7 @@ export default async function HomePage() {
       {/* 3. News Grid & Filtering (Topic Tabs + Search) */}
       <section className="space-y-6">
         <FeedSectionHeading />
-        <NewsGridWithFilter articles={gridArticles} />
+        <NewsGridWithFilter articles={gridArticles} totalAvailable={totalPublishedCount} />
       </section>
 
       {/* 4. Embedded Newsletter Capture */}
