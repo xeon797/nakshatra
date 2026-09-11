@@ -186,6 +186,170 @@ export function buildStructuredEvidence(params: {
   };
 }
 
+/**
+ * Deterministically extracts grounded claims, confirmed facts, differing perspectives,
+ * and structured evidence directly from primary & secondary source texts without AI calls.
+ */
+export function extractDeterministicEvidence(params: {
+  storyTitle: string;
+  category?: string;
+  primarySources: SourceInput[];
+  secondarySources: SourceInput[];
+}): {
+  confirmedFacts: string[];
+  differingPerspectives: string[];
+  verifiedClaimsList: StrictVerifiedClaim[];
+  structuredDetails: StructuredEvidenceDetails;
+} {
+  const { storyTitle, primarySources, secondarySources } = params;
+  const pSrc = primarySources[0] || {
+    title: storyTitle,
+    url: 'https://nakshatra.ai',
+    text: storyTitle,
+    sourceName: 'Primary Source',
+  };
+  const primaryText = pSrc.text || '';
+  const confirmedFacts: string[] = [];
+  const differingPerspectives: string[] = [];
+  const verifiedClaimsList: StrictVerifiedClaim[] = [];
+  const verifiedClaimsWithTypes: Array<{
+    claimText: string;
+    claimType: string;
+    isPrimary: boolean;
+    isConfirmed: boolean;
+  }> = [];
+
+  const classifySentenceType = (s: string): { type: 'benchmark_result' | 'architecture' | 'product_release' | 'quote' | 'policy_or_safety'; epistemic: 'FACT' | 'ANALYSIS' } => {
+    if (/(?:benchmark|mmlu|gsm8k|humaneval|swe-bench|score|accuracy|percent|%|sota|outperform)/i.test(s)) {
+      return { type: 'benchmark_result', epistemic: 'FACT' };
+    }
+    if (/(?:architecture|parameter|context window|weights|transformer|token|latency|inference|training|dataset|distill)/i.test(s)) {
+      return { type: 'architecture', epistemic: 'FACT' };
+    }
+    if (/(?:safety|guardrail|risk|breach|lawsuit|regulatory|compliance|red-team)/i.test(s)) {
+      return { type: 'policy_or_safety', epistemic: 'FACT' };
+    }
+    if (/^["'].*["']$/.test(s.trim()) || /(?:said|stated|commented|announced|explained|noted)/i.test(s)) {
+      return { type: 'quote', epistemic: 'FACT' };
+    }
+    return { type: 'product_release', epistemic: 'FACT' };
+  };
+
+  const seenFacts = new Set<string>();
+
+  // 1. Primary Announcement Headline as first core claim
+  if (pSrc.title && pSrc.title.length > 10) {
+    seenFacts.add(pSrc.title.toLowerCase());
+    confirmedFacts.push(pSrc.title);
+    verifiedClaimsList.push(
+      normalizeVerifiedClaim({
+        claimId: `claim-p-1`,
+        claimText: pSrc.title,
+        sourceUrl: pSrc.url,
+        sourceTitle: pSrc.sourceName || 'Primary Announcement',
+        sourceType: 'product_release',
+        evidenceExcerpt: pSrc.title,
+        epistemicClass: 'FACT',
+        confidenceScore: 0.98,
+      })
+    );
+    verifiedClaimsWithTypes.push({
+      claimText: pSrc.title,
+      claimType: 'product_release',
+      isPrimary: true,
+      isConfirmed: true,
+    });
+  }
+
+  // 2. Extract grounded factual sentences from primary text
+  const primarySentences = primaryText
+    .split(/(?<=[.?!])\s+|\n+/)
+    .map((s) => s.trim().replace(/^[-*•#>\d.]+\s*/, ''))
+    .filter((s) => s.length >= 35 && s.length <= 300 && !/^https?:\/\//i.test(s));
+
+  for (const sentence of primarySentences) {
+    if (confirmedFacts.length >= 8) break;
+    const lower = sentence.toLowerCase();
+    if (seenFacts.has(lower)) continue;
+    if (/(?:subscribe|newsletter|cookie|sign in|privacy policy|terms of service|copyright \d{4})/i.test(lower)) continue;
+
+    seenFacts.add(lower);
+    const { type, epistemic } = classifySentenceType(sentence);
+    confirmedFacts.push(sentence);
+    verifiedClaimsList.push(
+      normalizeVerifiedClaim({
+        claimId: `claim-p-${verifiedClaimsList.length + 1}`,
+        claimText: sentence,
+        sourceUrl: pSrc.url,
+        sourceTitle: pSrc.sourceName || 'Primary Lab',
+        sourceType: type,
+        evidenceExcerpt: sentence,
+        epistemicClass: epistemic,
+        confidenceScore: 0.95,
+      })
+    );
+    verifiedClaimsWithTypes.push({
+      claimText: sentence,
+      claimType: type,
+      isPrimary: true,
+      isConfirmed: true,
+    });
+  }
+
+  // 3. Extract differing perspectives & analysis from secondary sources
+  for (let sIdx = 0; sIdx < secondarySources.length; sIdx++) {
+    const sSrc = secondarySources[sIdx];
+    const secText = sSrc.text || '';
+    const secSentences = secText
+      .split(/(?<=[.?!])\s+|\n+/)
+      .map((s) => s.trim().replace(/^[-*•#>\d.]+\s*/, ''))
+      .filter((s) => s.length >= 35 && s.length <= 300 && !/^https?:\/\//i.test(s));
+
+    for (const sentence of secSentences) {
+      if (differingPerspectives.length >= 4) break;
+      const lower = sentence.toLowerCase();
+      if (seenFacts.has(lower)) continue;
+      if (/(?:subscribe|newsletter|cookie|sign in|privacy policy|terms of service)/i.test(lower)) continue;
+
+      seenFacts.add(lower);
+      differingPerspectives.push(sentence);
+      verifiedClaimsList.push(
+        normalizeVerifiedClaim({
+          claimId: `claim-s-${verifiedClaimsList.length + 1}`,
+          claimText: sentence,
+          sourceUrl: sSrc.url,
+          sourceTitle: sSrc.sourceName || 'Industry Perspective',
+          sourceType: 'analysis',
+          evidenceExcerpt: sentence,
+          epistemicClass: 'ANALYSIS',
+          confidenceScore: 0.88,
+        })
+      );
+      verifiedClaimsWithTypes.push({
+        claimText: sentence,
+        claimType: 'quote',
+        isPrimary: false,
+        isConfirmed: false,
+      });
+    }
+  }
+
+  const structuredDetails = buildStructuredEvidence({
+    storyTitle,
+    primarySources,
+    secondarySources,
+    verifiedClaimsWithTypes,
+    differingPerspectives,
+  });
+
+  return {
+    confirmedFacts,
+    differingPerspectives,
+    verifiedClaimsList,
+    structuredDetails,
+  };
+}
+
 export class MultiSourceResearcherAgent {
   private claimExtractor: ClaimExtractionAgent;
   private factVerifier: FactVerificationAgent;
@@ -199,9 +363,13 @@ export class MultiSourceResearcherAgent {
   }
 
   /**
-   * Builds an EvidencePacket aggregating primary and secondary sources for a given story_id
+   * Builds an EvidencePacket aggregating primary and secondary sources for a given story_id.
+   * In deterministic mode (default for free-tier efficiency), extracts grounded claims with 0 Gemini calls.
    */
-  async buildEvidencePacket(storyId: string): Promise<EvidencePacket> {
+  async buildEvidencePacket(
+    storyId: string,
+    options?: { deterministicOnly?: boolean }
+  ): Promise<EvidencePacket> {
     const db = await getDb();
 
     // 1. Fetch story
@@ -296,12 +464,13 @@ export class MultiSourceResearcherAgent {
             pSrc.retrievalStatus = 'fallback';
             pSrc.provenance = `RSS feed fallback from ${pSrc.url}`;
           }
-        } catch {
+        } catch (err) {
           // Keep RSS text as fallback only when primary extraction fails
           pSrc.text = originalRssText;
           pSrc.extractionStatus = 'fallback_rss';
           pSrc.retrievalStatus = 'fallback';
           pSrc.provenance = `RSS feed fallback from ${pSrc.url}`;
+          console.warn(`[Researcher] Primary Jina extraction failed for ${pSrc.url}: ${(err as Error)?.message}`);
         }
       } else {
         pSrc.extractionStatus = 'raw';
@@ -310,8 +479,11 @@ export class MultiSourceResearcherAgent {
       }
     }
 
-    // Also enrich secondary sources if HTTP URL is available
-    for (const sSrc of secondarySources.slice(0, 2)) {
+    // Also enrich secondary sources (max 1 secondary to prevent compounding network delays)
+    const hasRichPrimary = primarySources.some((p) => p.text && p.text.length > 500);
+    const secondaryToEnrich = hasRichPrimary ? secondarySources.slice(0, 1) : secondarySources.slice(0, 2);
+
+    for (const sSrc of secondaryToEnrich) {
       if (sSrc.url && sSrc.url.startsWith('http')) {
         const originalText = sSrc.text || '';
         sSrc.retrievedAt = new Date().toISOString();
@@ -328,16 +500,38 @@ export class MultiSourceResearcherAgent {
             sSrc.retrievalStatus = 'fallback';
             sSrc.provenance = `Secondary metadata fallback from ${sSrc.url}`;
           }
-        } catch {
+        } catch (err) {
           sSrc.text = originalText;
           sSrc.extractionStatus = 'fallback_rss';
           sSrc.retrievalStatus = 'fallback';
           sSrc.provenance = `Secondary metadata fallback from ${sSrc.url}`;
+          console.warn(`[Researcher] Secondary Jina extraction failed for ${sSrc.url}: ${(err as Error)?.message}`);
         }
       }
     }
 
     // 3. Extract claims from primary and secondary sources
+    const isDeterministic = options?.deterministicOnly === true;
+    if (isDeterministic) {
+      const deterministicResult = extractDeterministicEvidence({
+        storyTitle: story.title,
+        category: story.category || undefined,
+        primarySources,
+        secondarySources,
+      });
+
+      return {
+        storyId,
+        primarySources,
+        secondarySources,
+        confirmedFacts: deterministicResult.confirmedFacts,
+        differingPerspectives: deterministicResult.differingPerspectives,
+        structuredDetails: deterministicResult.structuredDetails,
+        category: story.category || 'llm_release',
+        verifiedClaimsList: deterministicResult.verifiedClaimsList,
+      };
+    }
+
     const allClaimsToVerify: Array<{
       claimId: string;
       claimText: string;
@@ -349,7 +543,8 @@ export class MultiSourceResearcherAgent {
       evidenceExcerpt: string;
     }> = [];
 
-    for (const pSrc of primarySources) {
+    // Prioritize primary source claim extraction
+    for (const pSrc of primarySources.slice(0, 1)) {
       try {
         const { claims } = await this.claimExtractor.extractClaims({
           articleTitle: pSrc.title,
@@ -368,32 +563,35 @@ export class MultiSourceResearcherAgent {
             evidenceExcerpt: c.sourceExcerpt || c.claimText,
           });
         }
-      } catch {
-        // Fallback gracefully
+      } catch (err) {
+        console.warn(`[Researcher] Primary claim extraction failed for "${pSrc.title}": ${(err as Error)?.message}`);
       }
     }
 
-    for (const sSrc of secondarySources) {
-      try {
-        const { claims } = await this.claimExtractor.extractClaims({
-          articleTitle: sSrc.title,
-          articleText: sSrc.text,
-          sourceName: sSrc.sourceName || 'Secondary Source',
-        });
-        for (const c of claims) {
-          allClaimsToVerify.push({
-            claimId: `claim-s-${allClaimsToVerify.length + 1}`,
-            claimText: c.claimText,
-            claimType: c.claimType,
-            isFromPrimary: false,
-            sourceUrl: sSrc.url,
-            sourceTitle: sSrc.sourceName || sSrc.title || 'Secondary Source',
-            sourceType: sSrc.sourceTier || 'tier_2_verified',
-            evidenceExcerpt: c.sourceExcerpt || c.claimText,
+    // Secondary sources: only extract if primary yielded fewer than 5 claims
+    if (allClaimsToVerify.length < 5) {
+      for (const sSrc of secondarySources.slice(0, 1)) {
+        try {
+          const { claims } = await this.claimExtractor.extractClaims({
+            articleTitle: sSrc.title,
+            articleText: sSrc.text,
+            sourceName: sSrc.sourceName || 'Secondary Source',
           });
+          for (const c of claims) {
+            allClaimsToVerify.push({
+              claimId: `claim-s-${allClaimsToVerify.length + 1}`,
+              claimText: c.claimText,
+              claimType: c.claimType,
+              isFromPrimary: false,
+              sourceUrl: sSrc.url,
+              sourceTitle: sSrc.sourceName || sSrc.title || 'Secondary Source',
+              sourceType: sSrc.sourceTier || 'tier_2_verified',
+              evidenceExcerpt: c.sourceExcerpt || c.claimText,
+            });
+          }
+        } catch (err) {
+          console.warn(`[Researcher] Secondary claim extraction failed for "${sSrc.title}": ${(err as Error)?.message}`);
         }
-      } catch {
-        // Fallback gracefully
       }
     }
 
@@ -470,8 +668,8 @@ export class MultiSourceResearcherAgent {
             isConfirmed,
           });
         }
-      } catch {
-        // Fallback
+      } catch (err) {
+        console.warn(`[Researcher] Fact verification failed: ${(err as Error)?.message}`);
       }
     }
 

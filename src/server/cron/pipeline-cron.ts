@@ -34,7 +34,15 @@ export async function handlePipelineCron(req: Request, workerInstance?: Autonomo
 
   try {
     const worker = workerInstance || new AutonomousPhase2Worker();
-    workerSummary = await worker.runCycle();
+    const batchSize = process.env.CRON_BATCH_SIZE ? parseInt(process.env.CRON_BATCH_SIZE, 10) : 3;
+    const geminiBudget = process.env.CRON_GEMINI_BUDGET ? parseInt(process.env.CRON_GEMINI_BUDGET, 10) : 4;
+    const maxRuntimeMs = 50000; // 50s safe for serverless
+
+    workerSummary = await worker.runCycle({
+      batchSize,
+      geminiBudget,
+      maxRuntimeMs,
+    });
 
     if (workerSummary.errors.length > 0) {
       errorMessage = workerSummary.errors.slice(0, 5).join('; ');
@@ -50,11 +58,26 @@ export async function handlePipelineCron(req: Request, workerInstance?: Autonomo
     runStatus = 'error';
     errorMessage = err instanceof Error ? err.message : String(err);
     workerSummary = {
+      runId: ownerId,
+      startedAt: new Date(startTime).toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: Date.now() - startTime,
       sourcesPolled: 0,
       sourcesProcessed: 0,
       rawArticlesIngested: 0,
       clustersCreated: 0,
+      storiesScanned: 0,
+      storiesEligible: 0,
+      storiesClaimed: 0,
       autoApprovedArticlesPublished: 0,
+      storiesRetried: 0,
+      storiesFailed: 0,
+      storiesSkipped: 0,
+      staleJobsRecovered: 0,
+      geminiRequestsUsed: 0,
+      geminiBudget: 0,
+      quotaEncountered: false,
+      stopReason: 'FATAL_ERROR' as const,
       errors: [errorMessage],
     };
   } finally {
@@ -91,6 +114,10 @@ export async function handlePipelineCron(req: Request, workerInstance?: Autonomo
           itemsIngested: workerSummary.rawArticlesIngested,
           storiesClustered: workerSummary.clustersCreated,
           articlesPublished: workerSummary.autoApprovedArticlesPublished,
+          storiesClaimed: workerSummary.storiesClaimed,
+          staleJobsRecovered: workerSummary.staleJobsRecovered,
+          geminiRequestsUsed: workerSummary.geminiRequestsUsed,
+          stopReason: workerSummary.stopReason,
         },
         errors: workerSummary.errors,
       },
@@ -106,6 +133,10 @@ export async function handlePipelineCron(req: Request, workerInstance?: Autonomo
       itemsIngested: workerSummary.rawArticlesIngested,
       storiesClustered: workerSummary.clustersCreated,
       articlesPublished: workerSummary.autoApprovedArticlesPublished,
+      storiesClaimed: workerSummary.storiesClaimed,
+      staleJobsRecovered: workerSummary.staleJobsRecovered,
+      geminiRequestsUsed: workerSummary.geminiRequestsUsed,
+      stopReason: workerSummary.stopReason,
     },
     errors: workerSummary.errors,
   });

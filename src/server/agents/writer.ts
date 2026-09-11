@@ -11,11 +11,12 @@ import { AiModelProvider } from '../../services/ai/provider';
 import { getAiProvider } from '../../services/ai/factory';
 import { getDb } from '../../db';
 import * as schema from '../../db/schema';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 
 export interface SynthesizeStoryArticleOptions {
   publicationIntent?: 'published' | 'review_pending';
   forcePublish?: boolean;
+  skipIfAlreadyPublished?: boolean;
 }
 
 export class MultiSourceWriterAgent {
@@ -26,6 +27,10 @@ export class MultiSourceWriterAgent {
     const provider = aiProvider || getAiProvider();
     this.synthesisAgent = new EditorialSynthesisAgent(provider);
     this.articleManager = new ArticleManager();
+  }
+
+  public getAiProvider(): AiModelProvider {
+    return this.synthesisAgent.getAiProvider();
   }
 
   /**
@@ -45,6 +50,35 @@ export class MultiSourceWriterAgent {
       .from(schema.stories)
       .where(eq(schema.stories.id, evidencePacket.storyId))
       .limit(1);
+
+    // Idempotency check: if skipIfAlreadyPublished is enabled and article already published, return immediately
+    if (options?.skipIfAlreadyPublished && story?.id) {
+      const [existingPublished] = await db
+        .select()
+        .from(schema.articles)
+        .where(
+          and(
+            eq(schema.articles.storyId, story.id),
+            eq(schema.articles.status, 'published')
+          )
+        )
+        .limit(1);
+
+      if (existingPublished) {
+        await db
+          .update(schema.stories)
+          .set({
+            editorialStatus: 'published',
+            processingStatus: 'completed',
+            failureReason: null,
+            failureStage: null,
+            lastUpdatedAt: new Date(),
+          })
+          .where(eq(schema.stories.id, story.id));
+
+        return existingPublished;
+      }
+    }
 
     const topicTitle = story ? story.title : 'AI Intelligence Briefing';
 
@@ -183,6 +217,7 @@ export class MultiSourceWriterAgent {
 
       return savedArticle;
     } catch (err) {
+      console.warn('[Writer] Bilingual synthesis attempt failed:', err);
       // Re-throw critical safety and grounding validation errors
       if (err instanceof PlagiarismGateError || err instanceof GroundingValidationError) {
         throw err;

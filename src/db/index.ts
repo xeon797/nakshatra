@@ -13,6 +13,11 @@ export type AppDatabase = ReturnType<typeof drizzlePg<typeof schema>> | ReturnTy
 
 let cachedDb: AppDatabase | null = null;
 let pgliteInstance: PGlite | null = null;
+let activePool: pg.Pool | null = null;
+
+export function getActivePool(): pg.Pool | null {
+  return activePool;
+}
 
 /**
  * Resolves the active data directory for embedded PGlite.
@@ -54,14 +59,18 @@ export async function getDb(): Promise<AppDatabase> {
         databaseUrl.includes('127.0.0.1') ||
         databaseUrl.includes('sslmode=disable');
 
-      const pool = new Pool({
-        connectionString: databaseUrl,
-        max: process.env.DB_POOL_MAX ? parseInt(process.env.DB_POOL_MAX, 10) : 10,
-        idleTimeoutMillis: 10000,
-        connectionTimeoutMillis: 5000,
-        ssl: isLocal ? false : { rejectUnauthorized: false },
-      });
-      cachedDb = drizzlePg(pool, { schema });
+      if (!activePool) {
+        activePool = new Pool({
+          connectionString: databaseUrl,
+          max: process.env.DB_POOL_MAX ? parseInt(process.env.DB_POOL_MAX, 10) : 10,
+          idleTimeoutMillis: 10000,
+          connectionTimeoutMillis: 5000,
+          statement_timeout: 10000,
+          query_timeout: 10000,
+          ssl: isLocal ? false : { rejectUnauthorized: false },
+        });
+      }
+      cachedDb = drizzlePg(activePool, { schema });
       return cachedDb;
     } catch (err) {
       console.warn('[DB] Failed to connect to external PostgreSQL, falling back to embedded PGlite:', err);
@@ -95,6 +104,14 @@ export async function getDb(): Promise<AppDatabase> {
 }
 
 export async function closeDb(): Promise<void> {
+  if (activePool) {
+    try {
+      await activePool.end();
+    } catch {
+      // Ignore close errors
+    }
+    activePool = null;
+  }
   if (pgliteInstance) {
     try {
       await pgliteInstance.close();
@@ -108,6 +125,10 @@ export async function closeDb(): Promise<void> {
 }
 
 export function resetDbForTesting(): void {
+  if (activePool) {
+    activePool.end().catch(() => {});
+    activePool = null;
+  }
   if (pgliteInstance) {
     try {
       pgliteInstance.close();

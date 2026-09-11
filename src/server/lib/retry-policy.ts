@@ -13,6 +13,7 @@ export type FailureStage = 'ingestion' | 'clustering' | 'research' | 'writing' |
 export interface ErrorClassification {
   isRetryable: boolean;
   isRateLimit: boolean;
+  isBudgetExceeded?: boolean;
   reason: string;
 }
 
@@ -23,6 +24,21 @@ export interface ErrorClassification {
 export function classifyError(err: unknown): ErrorClassification {
   const message = err instanceof Error ? err.message : String(err);
   const lower = message.toLowerCase();
+
+  // 0. Explicit Gemini request budget halt (Not a failure, cleanly stops the batch)
+  const isBudgetExceeded =
+    lower.includes('budget') ||
+    lower.includes('geminibudgetexceedederror') ||
+    (err as { name?: string })?.name === 'GeminiBudgetExceededError';
+
+  if (isBudgetExceeded) {
+    return {
+      isRetryable: false,
+      isRateLimit: false,
+      isBudgetExceeded: true,
+      reason: message,
+    };
+  }
 
   // 1. Rate-limiting / Quota Exhaustion (Retryable after delay/cooldown, but halt current batch)
   const isRateLimit =
@@ -107,7 +123,8 @@ export function isStoryEligibleForRetry(
     retryCount?: number | null;
     lastAttemptedAt?: Date | string | null;
   },
-  maxRetries: number = getMaxRetriesFromEnv()
+  maxRetries: number = getMaxRetriesFromEnv(),
+  staleThresholdMs?: number
 ): boolean {
   // Only auto_approved stories can be automatically synthesized
   if (story.editorialStatus !== 'auto_approved') {
@@ -120,7 +137,14 @@ export function isStoryEligibleForRetry(
   }
 
   // Stories currently being processed by another worker are locked
+  // UNLESS a stale lease is provided and expired
   if (story.processingStatus === 'processing') {
+    if (staleThresholdMs && story.lastAttemptedAt) {
+      const elapsed = Date.now() - new Date(story.lastAttemptedAt).getTime();
+      if (elapsed >= staleThresholdMs) {
+        return true; // Stale lease expired
+      }
+    }
     return false;
   }
 
@@ -130,7 +154,7 @@ export function isStoryEligibleForRetry(
   }
 
   // Enforce backoff if story has previously failed
-  if (story.lastAttemptedAt && retries > 0) {
+  if (story.lastAttemptedAt && retries > 0 && story.processingStatus === 'failed') {
     const lastAttemptTime = new Date(story.lastAttemptedAt).getTime();
     const elapsed = Date.now() - lastAttemptTime;
     const requiredBackoff = getRetryBackoffMs(retries);

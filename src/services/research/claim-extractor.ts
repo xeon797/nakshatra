@@ -2,18 +2,44 @@ import { z } from 'zod';
 import { AiModelProvider } from '../ai/provider';
 import { AgentAuditLogger } from './audit-logger';
 
-export const ExtractedClaimSchema = z.object({
-  claimText: z.string().describe('An atomic, self-contained factual assertion.'),
-  claimType: z.enum([
-    'benchmark_result',
-    'product_release',
-    'quote',
-    'architecture',
-    'policy_or_safety',
-  ]),
-  sourceExcerpt: z.string().describe('The exact or near-exact sentence from the source supporting this claim.'),
-  confidenceScore: z.number().min(0).max(1).default(0.95),
-});
+export const ExtractedClaimSchema = z.preprocess(
+  (raw) => {
+    if (typeof raw === 'string') {
+      return {
+        claimText: raw,
+        claimType: 'product_release',
+        sourceExcerpt: raw,
+        confidenceScore: 0.95,
+      };
+    }
+    return raw;
+  },
+  z.object({
+    claimText: z.string().describe('An atomic, self-contained factual assertion.'),
+    claimType: z.preprocess((val) => {
+      if (typeof val === 'string') {
+        const lower = val.toLowerCase();
+        if (lower.includes('benchmark') || lower.includes('metric') || lower.includes('eval') || lower.includes('score')) return 'benchmark_result';
+        if (lower.includes('architecture') || lower.includes('technical') || lower.includes('mechanic') || lower.includes('spec')) return 'architecture';
+        if (lower.includes('quote') || lower.includes('said') || lower.includes('statement')) return 'quote';
+        if (lower.includes('policy') || lower.includes('safety') || lower.includes('governance') || lower.includes('risk') || lower.includes('limit')) return 'policy_or_safety';
+        return 'product_release';
+      }
+      return 'product_release';
+    }, z.enum([
+      'benchmark_result',
+      'product_release',
+      'quote',
+      'architecture',
+      'policy_or_safety',
+    ])),
+    sourceExcerpt: z.string().describe('The exact or near-exact sentence from the source supporting this claim.'),
+    confidenceScore: z.preprocess(
+      (val) => (typeof val === 'number' ? Math.min(1, Math.max(0, val)) : 0.95),
+      z.number().min(0).max(1).default(0.95)
+    ),
+  })
+);
 
 export const ClaimExtractionResultSchema = z.object({
   claims: z.array(ExtractedClaimSchema),
@@ -68,7 +94,17 @@ Article Text:
 ${params.articleText}
 """
 
-Extract all atomic factual claims in strict JSON format.`;
+Extract all atomic factual claims in strict JSON format adhering to:
+{
+  "claims": [
+    {
+      "claimText": "Atomic factual assertion",
+      "claimType": "benchmark_result | product_release | quote | architecture | policy_or_safety",
+      "sourceExcerpt": "Exact excerpt from article",
+      "confidenceScore": 0.95
+    }
+  ]
+}`;
 
     try {
       const response = await this.aiProvider.generateStructured(
@@ -100,7 +136,7 @@ Extract all atomic factual claims in strict JSON format.`;
         });
       }
 
-      const mappedClaims = response.data.claims.map((c) => ({
+      const mappedClaims = (response.data.claims as ExtractedClaim[]).map((c) => ({
         claimText: c.claimText,
         claimType: c.claimType,
         sourceExcerpt: c.sourceExcerpt,

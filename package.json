@@ -17,7 +17,8 @@
     "worker": "tsx scripts/worker.ts",
     "worker:once": "tsx scripts/worker.ts --once",
     "smoke:test": "tsx scripts/smoke-test.ts",
-    "integration:test:live": "tsx scripts/live-api-probe.ts"
+    "integration:test:live": "tsx scripts/live-api-probe.ts",
+    "diagnostic:production": "tsx scripts/production-diagnostic.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.2.14",

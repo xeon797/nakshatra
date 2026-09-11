@@ -462,9 +462,14 @@ ${quotes || '  * None'}
   }
 
   const primaryRaw = (params.rawSourceTexts[0] || '').trim();
-  const sourceContext = primaryRaw
-    ? `\nPRIMARY SOURCE REFERENCE MATERIAL (Use to understand technical mechanics and provide clear explanations; do NOT copy verbatim):\n"""\n${primaryRaw.slice(0, 4000)}\n"""\n`
+  const secondaryRaw = (params.rawSourceTexts[1] || '').trim();
+  const primaryContext = primaryRaw
+    ? `\nPRIMARY SOURCE REFERENCE MATERIAL (${params.primaryPublisher || 'Primary Source'} - ${params.primarySourceUrl || ''}):\n"""\n${primaryRaw.slice(0, 4000)}\n"""\n`
     : '';
+  const secondaryContext = secondaryRaw
+    ? `\nSECONDARY EVIDENCE REFERENCE MATERIAL (Industry Analysis, Perspectives & Context):\n"""\n${secondaryRaw.slice(0, 2000)}\n"""\n`
+    : '';
+  const sourceContext = `${primaryContext}${secondaryContext}`;
 
   const epistemicTriadInstructions = `
 EPISTEMIC TRIAD PROTOCOL (MANDATORY JOURNALISTIC RIGOR):
@@ -863,6 +868,10 @@ export class EditorialSynthesisAgent {
     this.plagiarismDetector = plagiarismDetector || new PlagiarismDetector();
   }
 
+  public getAiProvider(): AiModelProvider {
+    return this.aiProvider;
+  }
+
   async synthesizeArticle(params: SynthesisAgentInput): Promise<SynthesisResult> {
     if (params.verifiedClaims.length === 0) {
       throw new Error('Cannot synthesize article: No verified claims provided.');
@@ -1000,6 +1009,7 @@ export class EditorialSynthesisAgent {
         {
           systemPrompt,
           temperature: 0.2,
+          maxTokens: 8192,
         }
       );
 

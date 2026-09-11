@@ -12,6 +12,25 @@ export interface ServiceTestResult {
   error?: string;
 }
 
+export async function withTimeout<T>(
+  promise: Promise<T>,
+  ms: number = 10000,
+  operationName: string = 'Operation'
+): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error(`[TIMEOUT] ${operationName} timed out after ${ms}ms`));
+    }, ms);
+  });
+
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 export async function testGeminiLive(): Promise<ServiceTestResult> {
   const rawKey = process.env.GEMINI_API_KEY;
   if (!rawKey || rawKey.trim().length === 0 || rawKey.includes('placeholder')) {
@@ -28,17 +47,20 @@ export async function testGeminiLive(): Promise<ServiceTestResult> {
 
   try {
     const client = new GoogleGenerativeAI(key);
-    const model = client.getGenerativeModel({
-      model: modelName,
-      generationConfig: {
-        responseMimeType: 'application/json',
-        maxOutputTokens: 256,
-        temperature: 0.1,
+    const model = client.getGenerativeModel(
+      {
+        model: modelName,
+        generationConfig: {
+          responseMimeType: 'application/json',
+          maxOutputTokens: 256,
+          temperature: 0.1,
+        },
       },
-    });
+      { timeout: 10000 }
+    );
 
     const prompt = 'Return a JSON object with a single field "status" set to "live_verified".';
-    const response = await model.generateContent(prompt);
+    const response = await withTimeout(model.generateContent(prompt), 10000, 'Gemini generateContent');
     const text = response.response.text();
 
     if (!text || text.trim().length === 0) {
@@ -229,12 +251,16 @@ export async function testResendLive(): Promise<ServiceTestResult> {
     // 1. If RESEND_TEST_RECIPIENT is provided, perform a real send to that authorized recipient
     const testRecipient = process.env.RESEND_TEST_RECIPIENT;
     if (testRecipient && testRecipient.includes('@')) {
-      const sendRes = await resend.emails.send({
-        from: 'onboarding@resend.dev',
-        to: testRecipient,
-        subject: 'NAKSHATRA Live Integration Test',
-        html: '<p>NAKSHATRA live Resend API verification successful.</p>',
-      });
+      const sendRes = await withTimeout(
+        resend.emails.send({
+          from: 'onboarding@resend.dev',
+          to: testRecipient,
+          subject: 'NAKSHATRA Live Integration Test',
+          html: '<p>NAKSHATRA live Resend API verification successful.</p>',
+        }),
+        10000,
+        'Resend send email'
+      );
 
       if (sendRes.error) {
         return {
@@ -253,12 +279,16 @@ export async function testResendLive(): Promise<ServiceTestResult> {
 
     // 2. Safe sandbox validation without sending unsolicited emails:
     // Send-restricted API keys validate via the /emails endpoint with onboarding@resend.dev
-    const probeResponse = await resend.emails.send({
-      from: 'onboarding@resend.dev',
-      to: 'connectivity-probe@nakshatra.invalid',
-      subject: 'NAKSHATRA Live Auth Check',
-      html: '<p>Connection probe</p>',
-    });
+    const probeResponse = await withTimeout(
+      resend.emails.send({
+        from: 'onboarding@resend.dev',
+        to: 'connectivity-probe@nakshatra.invalid',
+        subject: 'NAKSHATRA Live Auth Check',
+        html: '<p>Connection probe</p>',
+      }),
+      10000,
+      'Resend send probe'
+    );
 
     if (probeResponse.error) {
       const errorName = probeResponse.error.name;

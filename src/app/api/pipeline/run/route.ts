@@ -31,7 +31,14 @@ export async function POST() {
 
     try {
       const worker = new AutonomousPhase2Worker();
-      const summary = await worker.runCycle({ forceAllSources: true });
+      const batchSize = process.env.WORKER_BATCH_SIZE ? parseInt(process.env.WORKER_BATCH_SIZE, 10) : 3;
+      const geminiBudget = process.env.WORKER_GEMINI_BUDGET ? parseInt(process.env.WORKER_GEMINI_BUDGET, 10) : 4;
+      const summary = await worker.runCycle({
+        forceAllSources: true,
+        batchSize,
+        geminiBudget,
+        maxRuntimeMs: 50000,
+      });
 
       return NextResponse.json({
         success: true,

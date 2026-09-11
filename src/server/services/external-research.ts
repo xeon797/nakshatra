@@ -150,7 +150,7 @@ export async function extractCleanMarkdown(
   }
 
   const apiKey = options?.apiKey || process.env.JINA_API_KEY;
-  const timeoutMs = options?.timeoutMs ?? 8000;
+  const timeoutMs = options?.timeoutMs ?? 5000;
   const fetcher = options?.fetchFn || fetch;
 
   const controller = new AbortController();
@@ -174,15 +174,24 @@ export async function extractCleanMarkdown(
     });
 
     if (!response.ok) {
+      console.warn(`[JinaReader] Non-200 status (${response.status}) for ${url}. Using fallback text.`);
       return fallbackText;
     }
 
     const rawText = await response.text();
     const cleaned = cleanExtractedMarkdown(rawText);
 
-    return cleaned.length > 50 ? cleaned : (fallbackText || cleaned);
-  } catch {
-    // Network failure, timeout, or abort -> return fallback cleanly
+    if (cleaned.length > 50) {
+      return cleaned;
+    }
+    return fallbackText || cleaned;
+  } catch (err) {
+    const isAbort = (err as Error)?.name === 'AbortError';
+    if (isAbort) {
+      console.warn(`[JinaReader] Timeout after ${timeoutMs}ms extracting ${url}. Using fallback text.`);
+    } else {
+      console.warn(`[JinaReader] Error extracting ${url}: ${(err as Error)?.message}. Using fallback text.`);
+    }
     return fallbackText;
   } finally {
     clearTimeout(timer);
