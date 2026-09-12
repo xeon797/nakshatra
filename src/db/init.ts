@@ -194,7 +194,8 @@ CREATE TABLE IF NOT EXISTS stories (
     retry_count INT NOT NULL DEFAULT 0,
     failure_reason TEXT,
     failure_stage VARCHAR(50),
-    last_attempted_at TIMESTAMPTZ
+    last_attempted_at TIMESTAMPTZ,
+    next_attempt_at TIMESTAMPTZ
 );
 
 CREATE TABLE IF NOT EXISTS story_sources (
@@ -211,12 +212,14 @@ CREATE INDEX IF NOT EXISTS idx_stories_editorial_status ON stories(editorial_sta
 CREATE INDEX IF NOT EXISTS idx_stories_category ON stories(category);
 CREATE INDEX IF NOT EXISTS idx_stories_first_seen_at ON stories(first_seen_at);
 CREATE INDEX IF NOT EXISTS idx_stories_processing_status ON stories(processing_status);
+CREATE INDEX IF NOT EXISTS idx_stories_next_attempt_at ON stories(next_attempt_at);
 
 ALTER TABLE stories ADD COLUMN IF NOT EXISTS processing_status VARCHAR(50) NOT NULL DEFAULT 'pending';
 ALTER TABLE stories ADD COLUMN IF NOT EXISTS retry_count INT NOT NULL DEFAULT 0;
 ALTER TABLE stories ADD COLUMN IF NOT EXISTS failure_reason TEXT;
 ALTER TABLE stories ADD COLUMN IF NOT EXISTS failure_stage VARCHAR(50);
 ALTER TABLE stories ADD COLUMN IF NOT EXISTS last_attempted_at TIMESTAMPTZ;
+ALTER TABLE stories ADD COLUMN IF NOT EXISTS next_attempt_at TIMESTAMPTZ;
 
 ALTER TABLE articles ADD COLUMN IF NOT EXISTS story_id UUID REFERENCES stories(id) ON DELETE SET NULL;
 ALTER TABLE articles ADD COLUMN IF NOT EXISTS title_en VARCHAR(255) NOT NULL DEFAULT '';
@@ -297,6 +300,7 @@ export async function initializeDatabase(): Promise<void> {
     await db.execute(sql.raw('ALTER TABLE stories ADD COLUMN IF NOT EXISTS failure_reason TEXT;'));
     await db.execute(sql.raw('ALTER TABLE stories ADD COLUMN IF NOT EXISTS failure_stage VARCHAR(50);'));
     await db.execute(sql.raw('ALTER TABLE stories ADD COLUMN IF NOT EXISTS last_attempted_at TIMESTAMPTZ;'));
+    await db.execute(sql.raw('ALTER TABLE stories ADD COLUMN IF NOT EXISTS next_attempt_at TIMESTAMPTZ;'));
   } catch {
     // Ignored if column already exists
   }
@@ -319,6 +323,7 @@ export async function ensureDatabaseInitialized(): Promise<void> {
           await db.execute(sql.raw('ALTER TABLE stories ADD COLUMN IF NOT EXISTS failure_reason TEXT;'));
           await db.execute(sql.raw('ALTER TABLE stories ADD COLUMN IF NOT EXISTS failure_stage VARCHAR(50);'));
           await db.execute(sql.raw('ALTER TABLE stories ADD COLUMN IF NOT EXISTS last_attempted_at TIMESTAMPTZ;'));
+          await db.execute(sql.raw('ALTER TABLE stories ADD COLUMN IF NOT EXISTS next_attempt_at TIMESTAMPTZ;'));
         } catch {
           // Ignored if column exists
         }

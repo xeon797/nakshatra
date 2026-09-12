@@ -9,21 +9,36 @@ import {
   releasePipelineLock,
   PIPELINE_GLOBAL_LOCK,
 } from '../lib/pipeline-lock';
+import {
+  assertRuntimePolicy,
+  PIPELINE_GEMINI_TIMEOUT_MS,
+  PIPELINE_LOCK_LEASE_MS,
+  PIPELINE_QUOTA_COOLDOWN_MS,
+  PIPELINE_RESEARCH_FETCH_TIMEOUT_MS,
+  PIPELINE_SHUTDOWN_HEADROOM_MS,
+  PIPELINE_STORY_LEASE_MS,
+  PIPELINE_TRANSIENT_COOLDOWN_MS,
+  PIPELINE_WORKER_DEADLINE_MS,
+} from '../lib/runtime-policy';
 
 export async function handlePipelineCron(req: Request, workerInstance?: AutonomousPhase2Worker) {
+  const requestStartedAt = Date.now();
   if (!verifyCronSecret(req)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
+
+  assertRuntimePolicy();
 
   await ensureDatabaseInitialized();
   const db = await getDb();
   const ownerId = `cron-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
 
-  // Safe 90s lease prevents stalled locks if a serverless container terminates abruptly
+  // The lease expires before the 60s function limit, so a terminated invocation
+  // cannot leave active ownership behind.
   const lockAcquired = await acquirePipelineLock(db, {
     lockName: PIPELINE_GLOBAL_LOCK,
     ownerId,
-    leaseMs: 90000,
+    leaseMs: PIPELINE_LOCK_LEASE_MS,
   });
   if (!lockAcquired) {
     return NextResponse.json(
@@ -48,6 +63,8 @@ export async function handlePipelineCron(req: Request, workerInstance?: Autonomo
     const paramBatch = url?.searchParams.get('batchSize');
     const paramBudget = url?.searchParams.get('geminiBudget');
     const skipIngest = url?.searchParams.get('skipIngestion') === 'true';
+    const processQueueOnly =
+      url?.searchParams.get('processQueueOnly') === 'true' || skipIngest;
     const forceAll = url?.searchParams.get('forceAllSources') === 'true';
 
     const worker = workerInstance || new AutonomousPhase2Worker();
@@ -61,7 +78,7 @@ export async function handlePipelineCron(req: Request, workerInstance?: Autonomo
       : process.env.CRON_GEMINI_BUDGET
       ? parseInt(process.env.CRON_GEMINI_BUDGET, 10)
       : 2;
-    const maxRuntimeMs = 25000; // 25s safe for serverless invocation limits
+    const maxRuntimeMs = PIPELINE_WORKER_DEADLINE_MS;
 
     workerSummary = await worker.runCycle({
       batchSize,
@@ -69,7 +86,19 @@ export async function handlePipelineCron(req: Request, workerInstance?: Autonomo
       maxRuntimeMs,
       maxSourcesToIngest: forceAll ? undefined : 2,
       skipIngestion: skipIngest,
+      skipClustering: processQueueOnly,
+      processQueueOnly,
       forceAllSources: forceAll,
+      deadlineAt: requestStartedAt + PIPELINE_WORKER_DEADLINE_MS,
+      shutdownHeadroomMs: PIPELINE_SHUTDOWN_HEADROOM_MS,
+      geminiTimeoutMs: PIPELINE_GEMINI_TIMEOUT_MS,
+      geminiMaxRetries: processQueueOnly ? 0 : 1,
+      allowGeminiFallback: !processQueueOnly,
+      staleJobThresholdMs: processQueueOnly ? PIPELINE_STORY_LEASE_MS : undefined,
+      maxSourceEnrichments: processQueueOnly ? 2 : undefined,
+      researchFetchTimeoutMs: PIPELINE_RESEARCH_FETCH_TIMEOUT_MS,
+      transientCooldownMs: PIPELINE_TRANSIENT_COOLDOWN_MS,
+      quotaCooldownMs: PIPELINE_QUOTA_COOLDOWN_MS,
     });
 
     if (workerSummary.errors.length > 0) {

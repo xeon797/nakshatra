@@ -9,6 +9,7 @@ import {
 import { ArticleManager } from '../../services/editorial/article-manager';
 import { AiModelProvider } from '../../services/ai/provider';
 import { getAiProvider } from '../../services/ai/factory';
+import { isGeminiControlFlowError } from '../../services/ai/gemini-provider';
 import { getDb } from '../../db';
 import * as schema from '../../db/schema';
 import { eq, and } from 'drizzle-orm';
@@ -72,6 +73,7 @@ export class MultiSourceWriterAgent {
             processingStatus: 'completed',
             failureReason: null,
             failureStage: null,
+            nextAttemptAt: null,
             lastUpdatedAt: new Date(),
           })
           .where(eq(schema.stories.id, story.id));
@@ -210,6 +212,7 @@ export class MultiSourceWriterAgent {
             processingStatus: 'completed',
             failureReason: null,
             failureStage: null,
+            nextAttemptAt: null,
             lastUpdatedAt: new Date(),
           })
           .where(eq(schema.stories.id, story.id));
@@ -218,6 +221,12 @@ export class MultiSourceWriterAgent {
       return savedArticle;
     } catch (err) {
       console.warn('[Writer] Bilingual synthesis attempt failed:', err);
+      // Runtime, quota, and budget control signals must return to the worker.
+      // A second single-language generation here would violate the shared
+      // outbound attempt budget and could outlive the function deadline.
+      if (isGeminiControlFlowError(err)) {
+        throw err;
+      }
       // Re-throw critical safety and grounding validation errors
       if (err instanceof PlagiarismGateError || err instanceof GroundingValidationError) {
         throw err;
@@ -252,6 +261,7 @@ export class MultiSourceWriterAgent {
             processingStatus: 'completed',
             failureReason: null,
             failureStage: null,
+            nextAttemptAt: null,
             lastUpdatedAt: new Date(),
           })
           .where(eq(schema.stories.id, story.id));

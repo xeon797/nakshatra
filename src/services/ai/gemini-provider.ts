@@ -1,6 +1,12 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { z } from 'zod';
-import { AiModelProvider, AiCallOptions, AiResponse, AiStructuredResponse } from './provider';
+import {
+  AiModelProvider,
+  AiCallOptions,
+  AiResponse,
+  AiStructuredResponse,
+  AiExecutionPolicy,
+} from './provider';
 
 export class GeminiBudgetExceededError extends Error {
   constructor(public readonly budget: number, public readonly consumed: number) {
@@ -10,10 +16,33 @@ export class GeminiBudgetExceededError extends Error {
 }
 
 export class GeminiQuotaExhaustedError extends Error {
-  constructor(public override readonly message: string, public readonly retryDelaySeconds?: number) {
+  constructor(message: string, public readonly retryDelaySeconds?: number) {
     super(`[GeminiQuotaExhaustedError] Gemini free-tier quota exhausted: ${message}`);
     this.name = 'GeminiQuotaExhaustedError';
   }
+}
+
+export class GeminiServiceUnavailableError extends Error {
+  constructor(message: string) {
+    super(`[GeminiServiceUnavailableError] Gemini service unavailable: ${message}`);
+    this.name = 'GeminiServiceUnavailableError';
+  }
+}
+
+export class GeminiDeadlineExceededError extends Error {
+  constructor(message: string) {
+    super(`[GeminiDeadlineExceededError] ${message}`);
+    this.name = 'GeminiDeadlineExceededError';
+  }
+}
+
+export function isGeminiControlFlowError(error: unknown): boolean {
+  return (
+    error instanceof GeminiBudgetExceededError ||
+    error instanceof GeminiQuotaExhaustedError ||
+    error instanceof GeminiServiceUnavailableError ||
+    error instanceof GeminiDeadlineExceededError
+  );
 }
 
 function parseRetryDelay(errorMessage?: string): number | null {
@@ -31,65 +60,46 @@ function parseRetryDelay(errorMessage?: string): number | null {
   return null;
 }
 
-const DEFAULT_GEMINI_TIMEOUT_MS = 65000;
+const DEFAULT_GEMINI_TIMEOUT_MS = 30_000;
+const DEFAULT_MAX_RETRIES = 1;
+const RETRY_BASE_DELAY_MS = 1_000;
 
-async function withRetry<T>(
-  fn: () => Promise<T>,
-  maxRetries = 2,
-  baseDelayMs = 1500
-): Promise<T> {
-  let attempt = 0;
-  while (true) {
-    try {
-      return await fn();
-    } catch (error: unknown) {
-      attempt++;
-      const err = error as { status?: number; message?: string } | undefined;
-      const errorMessage = typeof err?.message === 'string' ? err.message : String(error);
-      const isRateLimit =
-        err?.status === 429 ||
-        errorMessage.includes('429') ||
-        errorMessage.includes('RESOURCE_EXHAUSTED') ||
-        errorMessage.includes('quota') ||
-        errorMessage.includes('Quota exceeded');
+function getErrorDetails(error: unknown): { status?: number; message: string } {
+  const candidate = error as { status?: number; message?: string } | undefined;
+  return {
+    status: candidate?.status,
+    message: typeof candidate?.message === 'string' ? candidate.message : String(error),
+  };
+}
 
-      const isRetryable =
-        attempt <= maxRetries &&
-        (isRateLimit ||
-          err?.status === 503 ||
-          err?.status === 500 ||
-          err?.status === 502 ||
-          err?.status === 504 ||
-          errorMessage.includes('503') ||
-          errorMessage.includes('500') ||
-          errorMessage.includes('UNAVAILABLE') ||
-          errorMessage.includes('fetch failed') ||
-          errorMessage.includes('overloaded') ||
-          errorMessage.includes('timed out'));
+function isQuotaError(error: unknown): boolean {
+  const { status, message } = getErrorDetails(error);
+  return (
+    status === 429 ||
+    message.includes('429') ||
+    message.includes('RESOURCE_EXHAUSTED') ||
+    message.toLowerCase().includes('quota') ||
+    message.toLowerCase().includes('rate limit')
+  );
+}
 
-      if (!isRetryable) {
-        if (isRateLimit) {
-          const parsed = parseRetryDelay(errorMessage);
-          throw new GeminiQuotaExhaustedError(errorMessage, parsed ? Math.round(parsed / 1000) : undefined);
-        }
-        throw error;
-      }
-
-      let delay: number;
-      const jitter = Math.floor(Math.random() * 300);
-      if (isRateLimit) {
-        const parsed = parseRetryDelay(errorMessage);
-        // Wait at least the suggested quota delay (bounded to max 25s) or backoff
-        delay = parsed ? Math.min(25000, parsed + jitter) : Math.min(25000, baseDelayMs * Math.pow(2, attempt) + jitter);
-        console.warn(`[GeminiProvider] Rate limit (429/Quota) encountered (attempt ${attempt}/${maxRetries}). Backing off ${Math.round(delay / 1000)}s before retry...`);
-      } else {
-        delay = baseDelayMs * Math.pow(2, attempt - 1) + jitter;
-        console.warn(`[GeminiProvider] Transient error on attempt ${attempt}/${maxRetries} (${errorMessage.slice(0, 100)}). Retrying in ${delay}ms...`);
-      }
-
-      await new Promise((resolve) => setTimeout(resolve, delay));
-    }
-  }
+function isTransientServiceError(error: unknown): boolean {
+  const { status, message } = getErrorDetails(error);
+  const lower = message.toLowerCase();
+  return (
+    status === 500 ||
+    status === 502 ||
+    status === 503 ||
+    status === 504 ||
+    lower.includes('500') ||
+    lower.includes('502') ||
+    lower.includes('503') ||
+    lower.includes('504') ||
+    lower.includes('unavailable') ||
+    lower.includes('overloaded') ||
+    lower.includes('fetch failed') ||
+    lower.includes('timed out')
+  );
 }
 
 export class GeminiProvider implements AiModelProvider {
@@ -98,8 +108,12 @@ export class GeminiProvider implements AiModelProvider {
   private client: GoogleGenerativeAI | null = null;
   private apiKey: string;
   private requestTimeoutMs: number;
-  private requestBudget: number | null = null;
-  private requestsExecuted = 0;
+  private attemptBudget: number | null = null;
+  private attemptsExecuted = 0;
+  private maxRetries = DEFAULT_MAX_RETRIES;
+  private deadlineAt: number | null = null;
+  private shutdownHeadroomMs = 0;
+  private allowModelFallback = true;
 
   constructor(
     apiKey?: string,
@@ -115,24 +129,43 @@ export class GeminiProvider implements AiModelProvider {
   }
 
   setRequestBudget(budget: number | null): void {
-    this.requestBudget = budget;
+    this.attemptBudget = budget;
   }
 
   getRequestBudget(): number | null {
-    return this.requestBudget;
+    return this.attemptBudget;
   }
 
   getRequestsExecuted(): number {
-    return this.requestsExecuted;
+    return this.attemptsExecuted;
+  }
+
+  getAttemptsExecuted(): number {
+    return this.attemptsExecuted;
   }
 
   resetRequestCount(): void {
-    this.requestsExecuted = 0;
+    this.attemptsExecuted = 0;
   }
 
   hasBudgetRemaining(): boolean {
-    if (this.requestBudget === null) return true;
-    return this.requestsExecuted < this.requestBudget;
+    if (this.attemptBudget === null) return true;
+    return this.attemptsExecuted < this.attemptBudget;
+  }
+
+  configureExecutionPolicy(policy: AiExecutionPolicy): void {
+    if (policy.attemptBudget !== undefined) this.attemptBudget = policy.attemptBudget;
+    if (policy.maxRetries !== undefined) this.maxRetries = Math.max(0, policy.maxRetries);
+    if (policy.requestTimeoutMs !== undefined) {
+      this.requestTimeoutMs = Math.max(1, policy.requestTimeoutMs);
+    }
+    if (policy.deadlineAt !== undefined) this.deadlineAt = policy.deadlineAt;
+    if (policy.shutdownHeadroomMs !== undefined) {
+      this.shutdownHeadroomMs = Math.max(0, policy.shutdownHeadroomMs);
+    }
+    if (policy.allowModelFallback !== undefined) {
+      this.allowModelFallback = policy.allowModelFallback;
+    }
   }
 
   private ensureClient(): GoogleGenerativeAI {
@@ -145,88 +178,161 @@ export class GeminiProvider implements AiModelProvider {
     return this.client;
   }
 
+  private resolveAttemptTimeoutMs(): number {
+    if (this.deadlineAt === null) return this.requestTimeoutMs;
+    const remaining = this.deadlineAt - Date.now() - this.shutdownHeadroomMs;
+    if (remaining <= 0) {
+      throw new GeminiDeadlineExceededError('No runtime remains for another outbound attempt.');
+    }
+    return Math.max(1, Math.min(this.requestTimeoutMs, remaining));
+  }
+
+  private consumeAttempt(): void {
+    if (this.attemptBudget !== null && this.attemptsExecuted >= this.attemptBudget) {
+      throw new GeminiBudgetExceededError(this.attemptBudget, this.attemptsExecuted);
+    }
+    this.attemptsExecuted++;
+  }
+
+  private normalizeProviderError(error: unknown): Error {
+    if (
+      error instanceof GeminiBudgetExceededError ||
+      error instanceof GeminiQuotaExhaustedError ||
+      error instanceof GeminiServiceUnavailableError ||
+      error instanceof GeminiDeadlineExceededError
+    ) {
+      return error;
+    }
+    const { message } = getErrorDetails(error);
+    if (isQuotaError(error)) {
+      const parsed = parseRetryDelay(message);
+      return new GeminiQuotaExhaustedError(
+        message,
+        parsed ? Math.round(parsed / 1000) : undefined
+      );
+    }
+    if (isTransientServiceError(error)) {
+      return new GeminiServiceUnavailableError(message);
+    }
+    return error instanceof Error ? error : new Error(message);
+  }
+
+  private canWaitForRetry(delayMs: number): boolean {
+    if (!this.hasBudgetRemaining()) return false;
+    if (this.deadlineAt === null) return true;
+    return Date.now() + delayMs + this.requestTimeoutMs + this.shutdownHeadroomMs < this.deadlineAt;
+  }
+
+  private async runSingleAttempt(
+    prompt: string,
+    modelName: string,
+    config: Record<string, unknown>
+  ) {
+    const client = this.ensureClient();
+    const timeoutMs = this.resolveAttemptTimeoutMs();
+    this.consumeAttempt();
+    const model = client.getGenerativeModel(
+      {
+        model: modelName,
+        ...config,
+      },
+      { timeout: timeoutMs }
+    );
+    let timer: NodeJS.Timeout | undefined;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        reject(new GeminiServiceUnavailableError(
+          `Request timed out after ${timeoutMs}ms for model ${modelName}`
+        ));
+      }, timeoutMs);
+    });
+    try {
+      return await Promise.race([model.generateContent(prompt), timeoutPromise]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  private async runModelWithRetries(
+    prompt: string,
+    modelName: string,
+    config: Record<string, unknown>
+  ) {
+    let retriesUsed = 0;
+    while (true) {
+      try {
+        return await this.runSingleAttempt(prompt, modelName, config);
+      } catch (error) {
+        const normalized = this.normalizeProviderError(error);
+        if (normalized instanceof GeminiQuotaExhaustedError) {
+          throw normalized;
+        }
+        const retryable = normalized instanceof GeminiServiceUnavailableError;
+        if (!retryable || retriesUsed >= this.maxRetries) {
+          throw normalized;
+        }
+        const delayMs = RETRY_BASE_DELAY_MS * Math.pow(2, retriesUsed) + Math.floor(Math.random() * 250);
+        if (!this.canWaitForRetry(delayMs)) {
+          throw normalized;
+        }
+        retriesUsed++;
+        console.warn(
+          `[GeminiProvider] Transient service failure; retrying attempt ${retriesUsed}/${this.maxRetries} in ${delayMs}ms.`
+        );
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
+  }
+
   private async executeGenerate(
     prompt: string,
     modelName: string,
     config: Record<string, unknown>
   ) {
-    if (this.requestBudget !== null && this.requestsExecuted >= this.requestBudget) {
-      throw new GeminiBudgetExceededError(this.requestBudget, this.requestsExecuted);
-    }
-
-    const client = this.ensureClient();
-    const timeoutMs = this.requestTimeoutMs;
-
-    const runWithTimeout = async (targetModel: string) => {
-      const model = client.getGenerativeModel(
-        {
-          model: targetModel,
-          ...config,
-        },
-        { timeout: timeoutMs }
-      );
-
-      let timer: NodeJS.Timeout | undefined;
-      const timeoutPromise = new Promise<never>((_, reject) => {
-        timer = setTimeout(() => {
-          reject(new Error(`[GeminiProvider] Request timed out after ${timeoutMs}ms for model ${targetModel}`));
-        }, timeoutMs);
-      });
-
-      try {
-        return await Promise.race([model.generateContent(prompt), timeoutPromise]);
-      } finally {
-        if (timer) clearTimeout(timer);
-      }
-    };
-
     try {
-      const res = await withRetry(() => runWithTimeout(modelName));
-      this.requestsExecuted++;
-      return res;
-    } catch (err: unknown) {
-      const errorObj = err as { status?: number; message?: string } | undefined;
-      const errorMessage = errorObj?.message || String(err);
-      // Automatic fallback if primary configured model encounters 503, 404, or 429 quota exhaustion
+      const result = await this.runModelWithRetries(prompt, modelName, config);
+      return { result, modelUsed: modelName };
+    } catch (error) {
+      const normalized = this.normalizeProviderError(error);
       const fallbackModel = 'gemini-flash-latest';
+      const { status, message } = getErrorDetails(error);
+      const fallbackEligible =
+        status === 404 ||
+        message.includes('404') ||
+        normalized instanceof GeminiServiceUnavailableError;
       if (
+        this.allowModelFallback &&
+        fallbackEligible &&
+        !(normalized instanceof GeminiQuotaExhaustedError) &&
         modelName !== fallbackModel &&
-        (errorObj?.status === 503 ||
-          errorObj?.status === 404 ||
-          errorObj?.status === 429 ||
-          errorMessage.includes('503') ||
-          errorMessage.includes('404') ||
-          errorMessage.includes('429') ||
-          errorMessage.includes('Quota exceeded') ||
-          errorMessage.includes('RESOURCE_EXHAUSTED'))
+        this.hasBudgetRemaining()
       ) {
-        console.warn(`[GeminiProvider] Primary model "${modelName}" unavailable (${errorMessage.slice(0, 120)}). Falling back to ${fallbackModel}.`);
-        const fallbackRes = await withRetry(() => runWithTimeout(fallbackModel));
-        this.requestsExecuted++;
-        return fallbackRes;
+        console.warn(`[GeminiProvider] Falling back from "${modelName}" to "${fallbackModel}".`);
+        const result = await this.runModelWithRetries(prompt, fallbackModel, config);
+        return { result, modelUsed: fallbackModel };
       }
-      throw err;
+      throw normalized;
     }
   }
 
   async generateText(prompt: string, options?: AiCallOptions): Promise<AiResponse> {
     const modelName = options?.modelOverride || this.defaultModel;
-    const result = await this.executeGenerate(prompt, modelName, {
+    const execution = await this.executeGenerate(prompt, modelName, {
       systemInstruction: options?.systemPrompt,
       generationConfig: {
         temperature: options?.temperature ?? 0.2,
         maxOutputTokens: options?.maxTokens ?? 4096,
       },
     });
-    const text = result.response.text();
-    const usage = result.response.usageMetadata;
+    const text = execution.result.response.text();
+    const usage = execution.result.response.usageMetadata;
 
     return {
       text,
       promptTokens: usage?.promptTokenCount ?? 0,
       completionTokens: usage?.candidatesTokenCount ?? 0,
       totalTokens: usage?.totalTokenCount ?? 0,
-      modelUsed: modelName,
+      modelUsed: execution.modelUsed,
     };
   }
 
@@ -250,14 +356,14 @@ export class GeminiProvider implements AiModelProvider {
       };
     }
 
-    const result = await this.executeGenerate(structuredPrompt, modelName, {
+    const execution = await this.executeGenerate(structuredPrompt, modelName, {
       systemInstruction: options?.systemPrompt,
       generationConfig,
     });
-    const rawText = result.response.text();
-    const candidate = result.response.candidates?.[0];
+    const rawText = execution.result.response.text();
+    const candidate = execution.result.response.candidates?.[0];
     const finishReason = candidate?.finishReason;
-    const usage = result.response.usageMetadata;
+    const usage = execution.result.response.usageMetadata;
 
     let parsedJson: unknown;
     try {
@@ -284,7 +390,7 @@ export class GeminiProvider implements AiModelProvider {
       promptTokens: usage?.promptTokenCount ?? 0,
       completionTokens: usage?.candidatesTokenCount ?? 0,
       totalTokens: usage?.totalTokenCount ?? 0,
-      modelUsed: modelName,
+      modelUsed: execution.modelUsed,
     };
   }
 }

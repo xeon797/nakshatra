@@ -26,4 +26,4 @@ jobs:
             --max-time 55 \
             --request POST \
             --header "Authorization: Bearer ${CRON_SECRET}" \
-            "${PRODUCTION_URL%/}/api/cron/pipeline?batchSize=1&geminiBudget=1&skipIngestion=true"
+            "${PRODUCTION_URL%/}/api/cron/pipeline?processQueueOnly=true&batchSize=1&geminiBudget=1&skipIngestion=true"

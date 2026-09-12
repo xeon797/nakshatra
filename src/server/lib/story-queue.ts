@@ -20,15 +20,15 @@ export interface StaleRecoveryResult {
  * Recovers stranded / zombie stories that were left in 'processing' status
  * due to worker crashes, serverless function timeouts, or uncaught aborts.
  *
- * Transitions stale stories to 'failed' (with retry increment and backoff)
- * or to 'needs_review' if maxRetries are exceeded.
+ * Returns stale stories to the pending queue without consuming a retry. A
+ * function timeout does not prove that synthesis failed and must not penalize
+ * the story.
  */
 export async function recoverStaleProcessingJobs(
   db: Awaited<ReturnType<typeof getDb>>,
   options?: StaleRecoveryOptions
 ): Promise<StaleRecoveryResult> {
   const staleThresholdMs = options?.staleThresholdMs ?? DEFAULT_STALE_JOB_THRESHOLD_MS;
-  const maxRetries = options?.maxRetries ?? getMaxRetriesFromEnv();
   const staleCutoff = new Date(Date.now() - staleThresholdMs);
 
   const staleStories = await db
@@ -45,18 +45,14 @@ export async function recoverStaleProcessingJobs(
   const recoveredStoryIds: string[] = [];
 
   for (const story of staleStories) {
-    const nextRetryCount = (story.retryCount || 0) + 1;
-    const isExhausted = nextRetryCount >= maxRetries;
-
     await db
       .update(schema.stories)
       .set({
-        editorialStatus: isExhausted ? 'needs_review' : 'auto_approved',
-        processingStatus: 'failed',
-        retryCount: nextRetryCount,
+        editorialStatus: 'auto_approved',
+        processingStatus: 'pending',
         failureReason: `Heartbeat lease expired: processing exceeded ${Math.round(staleThresholdMs / 1000)}s without completion (worker timeout/crash).`,
         failureStage: 'timeout',
-        lastAttemptedAt: new Date(),
+        nextAttemptAt: null,
         lastUpdatedAt: new Date(),
       })
       .where(eq(schema.stories.id, story.id));
@@ -120,6 +116,7 @@ export async function claimNextStoryBatch(
       .set({
         processingStatus: 'processing',
         lastAttemptedAt: new Date(),
+        nextAttemptAt: null,
         lastUpdatedAt: new Date(),
       })
       .where(
@@ -144,14 +141,24 @@ export async function claimNextStoryBatch(
  * Releases a claimed story back to 'pending' without incrementing retry count or penalty.
  * Used when a batch terminates early due to budget exhaustion or watchdog deadline.
  */
+export interface ReleaseStoryOptions {
+  failureReason?: string | null;
+  failureStage?: string | null;
+  nextAttemptAt?: Date | null;
+}
+
 export async function releaseStoryToPending(
   db: Awaited<ReturnType<typeof getDb>>,
-  storyId: string
+  storyId: string,
+  options?: ReleaseStoryOptions
 ): Promise<void> {
   await db
     .update(schema.stories)
     .set({
       processingStatus: 'pending',
+      failureReason: options?.failureReason,
+      failureStage: options?.failureStage,
+      nextAttemptAt: options?.nextAttemptAt ?? null,
       lastUpdatedAt: new Date(),
     })
     .where(
@@ -176,6 +183,7 @@ export async function markStoryCompleted(
       processingStatus: 'completed',
       failureReason: null,
       failureStage: null,
+      nextAttemptAt: null,
       lastUpdatedAt: new Date(),
     })
     .where(eq(schema.stories.id, storyId));
@@ -195,6 +203,7 @@ export async function countEligibleStoriesInQueue(
       processingStatus: schema.stories.processingStatus,
       retryCount: schema.stories.retryCount,
       lastAttemptedAt: schema.stories.lastAttemptedAt,
+      nextAttemptAt: schema.stories.nextAttemptAt,
     })
     .from(schema.stories)
     .where(eq(schema.stories.editorialStatus, 'auto_approved'));
@@ -206,7 +215,9 @@ export async function countEligibleStoriesInQueue(
   for (const row of rows) {
     if (row.processingStatus === 'pending') {
       pending++;
-      eligible++;
+      if (isStoryEligibleForRetry(row, maxRetries)) {
+        eligible++;
+      }
     } else if (row.processingStatus === 'failed') {
       failed++;
       if (isStoryEligibleForRetry(row, maxRetries)) {

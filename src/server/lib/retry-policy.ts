@@ -13,6 +13,7 @@ export type FailureStage = 'ingestion' | 'clustering' | 'research' | 'writing' |
 export interface ErrorClassification {
   isRetryable: boolean;
   isRateLimit: boolean;
+  isServiceUnavailable: boolean;
   isBudgetExceeded?: boolean;
   reason: string;
 }
@@ -35,6 +36,7 @@ export function classifyError(err: unknown): ErrorClassification {
     return {
       isRetryable: false,
       isRateLimit: false,
+      isServiceUnavailable: false,
       isBudgetExceeded: true,
       reason: message,
     };
@@ -67,6 +69,7 @@ export function classifyError(err: unknown): ErrorClassification {
     return {
       isRetryable: false,
       isRateLimit: false,
+      isServiceUnavailable: false,
       reason: message,
     };
   }
@@ -91,6 +94,7 @@ export function classifyError(err: unknown): ErrorClassification {
     return {
       isRetryable: true,
       isRateLimit,
+      isServiceUnavailable: isNetworkTransient && !isRateLimit,
       reason: message,
     };
   }
@@ -99,6 +103,7 @@ export function classifyError(err: unknown): ErrorClassification {
   return {
     isRetryable: true,
     isRateLimit: false,
+    isServiceUnavailable: false,
     reason: message,
   };
 }
@@ -122,6 +127,7 @@ export function isStoryEligibleForRetry(
     processingStatus?: string | null;
     retryCount?: number | null;
     lastAttemptedAt?: Date | string | null;
+    nextAttemptAt?: Date | string | null;
   },
   maxRetries: number = getMaxRetriesFromEnv(),
   staleThresholdMs?: number
@@ -133,6 +139,10 @@ export function isStoryEligibleForRetry(
 
   // Completed stories must never be re-processed
   if (story.processingStatus === 'completed') {
+    return false;
+  }
+
+  if (story.nextAttemptAt && new Date(story.nextAttemptAt).getTime() > Date.now()) {
     return false;
   }
 

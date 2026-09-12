@@ -1,10 +1,11 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { handlePipelineCron } from '../cron/pipeline-cron';
 import { getDb, resetDbForTesting } from '../../db';
 import * as schema from '../../db/schema';
 import { ensureDatabaseInitialized } from '../../db/init';
 import { eq } from 'drizzle-orm';
 import { AutonomousPhase2Worker } from '../worker';
+import { isPipelineLocked } from '../lib/pipeline-lock';
 
 describe('Production Cron Pipeline Route (/api/cron/pipeline)', () => {
   const CRON_SECRET = 'test-cron-secret-2026';
@@ -125,5 +126,24 @@ describe('Production Cron Pipeline Route (/api/cron/pipeline)', () => {
     const body = await res.json();
     expect(body.status).toBe('skipped');
     expect(body.reason).toBe('job_already_running');
+  });
+
+  it('releases the global lock when the worker throws', async () => {
+    const req = new Request(
+      'http://localhost:3000/api/cron/pipeline?processQueueOnly=true&batchSize=1&geminiBudget=1',
+      {
+        method: 'POST',
+        headers: { authorization: `Bearer ${CRON_SECRET}` },
+      }
+    );
+    const mockWorker = {
+      runCycle: vi.fn().mockRejectedValue(new Error('controlled worker failure')),
+    } as unknown as AutonomousPhase2Worker;
+
+    const response = await handlePipelineCron(req, mockWorker);
+    const lockState = await isPipelineLocked(await getDb());
+
+    expect(response.status).toBe(500);
+    expect(lockState.isLocked).toBe(false);
   });
 });

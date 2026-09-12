@@ -156,7 +156,8 @@ Anthropic evaluated the model against catastrophic risks under its Responsible S
 
       expect(extractSpy).toHaveBeenCalledWith(
         'https://anthropic.com/news/claude-3-7-sonnet',
-        shortSnippet
+        shortSnippet,
+        { timeoutMs: 5000 }
       );
       expect(packet.primarySources[0].text).toBe(fullArticleMarkdown);
       expect(packet.confirmedFacts.length).toBeGreaterThanOrEqual(2);
@@ -333,7 +334,8 @@ Google DeepMind introduces AlphaProof, a breakthrough system that bridges inform
       // Must call extractCleanMarkdown despite RSS description exceeding 2000 chars!
       expect(extractSpy).toHaveBeenCalledWith(
         'https://deepmind.google/discover/blog/ai-solves-imo-problems-alphaproof',
-        longRssText
+        longRssText,
+        { timeoutMs: 5000 }
       );
       expect(packet.primarySources[0].text).toBe(extractedJinaMarkdown);
       expect(packet.primarySources[0].extractionStatus).toBe('jina_extracted');

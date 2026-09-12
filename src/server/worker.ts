@@ -25,6 +25,21 @@ import {
   DEFAULT_STALE_JOB_THRESHOLD_MS,
 } from './lib/story-queue';
 import { revalidatePublishedContent } from '../lib/revalidation';
+import { AiExecutionPolicy, AiModelProvider } from '../services/ai/provider';
+import { getAiProvider } from '../services/ai/factory';
+import {
+  GeminiDeadlineExceededError,
+  GeminiQuotaExhaustedError,
+} from '../services/ai/gemini-provider';
+import {
+  PIPELINE_GEMINI_TIMEOUT_MS,
+  PIPELINE_QUOTA_COOLDOWN_MS,
+  PIPELINE_RESEARCH_FETCH_TIMEOUT_MS,
+  PIPELINE_SHUTDOWN_HEADROOM_MS,
+  PIPELINE_STORY_LEASE_MS,
+  PIPELINE_TRANSIENT_COOLDOWN_MS,
+  PIPELINE_WORKER_DEADLINE_MS,
+} from './lib/runtime-policy';
 
 export interface Phase2WorkerRunSummary {
   runId: string;
@@ -51,6 +66,7 @@ export interface Phase2WorkerRunSummary {
     | 'BATCH_LIMIT_REACHED'
     | 'BUDGET_EXHAUSTED'
     | 'QUOTA_EXHAUSTED'
+    | 'PROVIDER_UNAVAILABLE'
     | 'WATCHDOG_DEADLINE'
     | 'FATAL_ERROR';
   errors: string[];
@@ -68,11 +84,23 @@ export interface Phase2WorkerRunOptions {
   maxSourcesToIngest?: number;
   skipClustering?: boolean;
   deterministicEvidence?: boolean;
+  processQueueOnly?: boolean;
+  deadlineAt?: number;
+  shutdownHeadroomMs?: number;
+  geminiTimeoutMs?: number;
+  geminiMaxRetries?: number;
+  allowGeminiFallback?: boolean;
+  maxSourceEnrichments?: number;
+  researchFetchTimeoutMs?: number;
+  transientCooldownMs?: number;
+  quotaCooldownMs?: number;
 }
 
 interface BudgetableAiProvider {
   setRequestBudget?: (budget: number | null) => void;
   getRequestsExecuted?: () => number;
+  configureExecutionPolicy?: (policy: AiExecutionPolicy) => void;
+  getAttemptsExecuted?: () => number;
 }
 
 // Global in-process execution lock to prevent concurrent clusterer runs
@@ -83,17 +111,23 @@ export class AutonomousPhase2Worker {
   private clusterer: HybridStoryClusteringAgent;
   private researcher: MultiSourceResearcherAgent;
   private writer: MultiSourceWriterAgent;
+  private aiProvider?: AiModelProvider;
 
   constructor(dependencies?: {
     ingestionService?: IngestionService;
     clusterer?: HybridStoryClusteringAgent;
     researcher?: MultiSourceResearcherAgent;
     writer?: MultiSourceWriterAgent;
+    aiProvider?: AiModelProvider;
   }) {
+    const needsSharedProvider =
+      !dependencies?.clusterer || !dependencies?.researcher || !dependencies?.writer;
+    const sharedProvider = dependencies?.aiProvider || (needsSharedProvider ? getAiProvider() : undefined);
     this.ingestionService = dependencies?.ingestionService || new IngestionService();
-    this.clusterer = dependencies?.clusterer || new HybridStoryClusteringAgent();
-    this.researcher = dependencies?.researcher || new MultiSourceResearcherAgent();
-    this.writer = dependencies?.writer || new MultiSourceWriterAgent();
+    this.clusterer = dependencies?.clusterer || new HybridStoryClusteringAgent(sharedProvider);
+    this.researcher = dependencies?.researcher || new MultiSourceResearcherAgent(sharedProvider);
+    this.writer = dependencies?.writer || new MultiSourceWriterAgent(sharedProvider);
+    this.aiProvider = sharedProvider || this.writer.getAiProvider?.();
   }
 
   /**
@@ -108,11 +142,17 @@ export class AutonomousPhase2Worker {
 
     const startTime = Date.now();
     const runId = `worker-${startTime}-${Math.random().toString(36).substring(2, 8)}`;
+    const processQueueOnly = options?.processQueueOnly === true;
     const batchSize = options?.batchSize ?? (process.env.WORKER_BATCH_SIZE ? parseInt(process.env.WORKER_BATCH_SIZE, 10) : DEFAULT_WORKER_BATCH_SIZE);
     const geminiBudget = options?.geminiBudget ?? (process.env.WORKER_GEMINI_BUDGET ? parseInt(process.env.WORKER_GEMINI_BUDGET, 10) : 5);
-    const maxRuntimeMs = options?.maxRuntimeMs ?? (process.env.WORKER_MAX_RUNTIME_MS ? parseInt(process.env.WORKER_MAX_RUNTIME_MS, 10) : 50000);
-    const staleThresholdMs = options?.staleJobThresholdMs ?? DEFAULT_STALE_JOB_THRESHOLD_MS;
+    const maxRuntimeMs = options?.maxRuntimeMs ?? (process.env.WORKER_MAX_RUNTIME_MS ? parseInt(process.env.WORKER_MAX_RUNTIME_MS, 10) : PIPELINE_WORKER_DEADLINE_MS);
+    const deadlineAt = options?.deadlineAt ?? startTime + maxRuntimeMs;
+    const shutdownHeadroomMs = options?.shutdownHeadroomMs ?? PIPELINE_SHUTDOWN_HEADROOM_MS;
+    const geminiTimeoutMs = options?.geminiTimeoutMs ?? PIPELINE_GEMINI_TIMEOUT_MS;
+    const staleThresholdMs = options?.staleJobThresholdMs ?? (processQueueOnly ? PIPELINE_STORY_LEASE_MS : DEFAULT_STALE_JOB_THRESHOLD_MS);
     const maxRetries = options?.maxRetries ?? getMaxRetriesFromEnv();
+    const transientCooldownMs = options?.transientCooldownMs ?? PIPELINE_TRANSIENT_COOLDOWN_MS;
+    const quotaCooldownMs = options?.quotaCooldownMs ?? PIPELINE_QUOTA_COOLDOWN_MS;
 
     const summary: Phase2WorkerRunSummary = {
       runId,
@@ -138,21 +178,32 @@ export class AutonomousPhase2Worker {
       errors: [],
     };
 
-    // Configure Gemini request budget if provider supports it
-    const aiProvider = this.writer.getAiProvider?.();
-    const budgetable = aiProvider as unknown as BudgetableAiProvider | undefined;
-    if (typeof budgetable?.setRequestBudget === 'function') {
+    // One shared provider is used by clustering, research, synthesis, retries,
+    // verification, and model fallback. Attempts are counted before outbound I/O.
+    const budgetable = this.aiProvider as unknown as BudgetableAiProvider | undefined;
+    if (typeof budgetable?.configureExecutionPolicy === 'function') {
+      budgetable.configureExecutionPolicy({
+        attemptBudget: geminiBudget,
+        maxRetries: options?.geminiMaxRetries ?? (processQueueOnly ? 0 : 1),
+        requestTimeoutMs: geminiTimeoutMs,
+        deadlineAt,
+        shutdownHeadroomMs,
+        allowModelFallback: options?.allowGeminiFallback ?? !processQueueOnly,
+      });
+    } else if (typeof budgetable?.setRequestBudget === 'function') {
       budgetable.setRequestBudget(geminiBudget);
     }
     const initialGeminiRequests =
-      typeof budgetable?.getRequestsExecuted === 'function'
+      typeof budgetable?.getAttemptsExecuted === 'function'
+        ? budgetable.getAttemptsExecuted()
+        : typeof budgetable?.getRequestsExecuted === 'function'
         ? budgetable.getRequestsExecuted()
         : 0;
 
     // ─────────────────────────────────────────────────────────────────────────
     // Step 1: Ingest due sources
     // ─────────────────────────────────────────────────────────────────────────
-    if (!options?.skipIngestion) {
+    if (!processQueueOnly && !options?.skipIngestion) {
       const activeSources = await db
         .select()
         .from(schema.sources)
@@ -193,7 +244,8 @@ export class AutonomousPhase2Worker {
     // ─────────────────────────────────────────────────────────────────────────
     // Step 2: Run Clusterer.processUnclustered() with concurrency execution lock
     // ─────────────────────────────────────────────────────────────────────────
-    if (!options?.skipClustering) {
+    let haltBeforeQueue = false;
+    if (!processQueueOnly && !options?.skipClustering) {
       let newClusters: ClusteredStoryResult[] = [];
       if (!isClusteringLocked) {
         isClusteringLocked = true;
@@ -204,6 +256,18 @@ export class AutonomousPhase2Worker {
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           summary.errors.push(`Clustering pipeline error: ${message}`);
+          const classification = classifyError(err);
+          if (classification.isBudgetExceeded) {
+            summary.stopReason = 'BUDGET_EXHAUSTED';
+            haltBeforeQueue = true;
+          } else if (classification.isRateLimit) {
+            summary.stopReason = 'QUOTA_EXHAUSTED';
+            summary.quotaEncountered = true;
+            haltBeforeQueue = true;
+          } else if (classification.isServiceUnavailable) {
+            summary.stopReason = 'PROVIDER_UNAVAILABLE';
+            haltBeforeQueue = true;
+          }
         } finally {
           isClusteringLocked = false;
         }
@@ -215,170 +279,224 @@ export class AutonomousPhase2Worker {
     // ─────────────────────────────────────────────────────────────────────────
     // Step 3: Hardened Queue Worker (Stale Recovery, Bounded Claiming, Watchdog)
     // ─────────────────────────────────────────────────────────────────────────
+    const activeClaimIds = new Set<string>();
+    const getAttemptsUsed = () => {
+      const total =
+        typeof budgetable?.getAttemptsExecuted === 'function'
+          ? budgetable.getAttemptsExecuted()
+          : typeof budgetable?.getRequestsExecuted === 'function'
+          ? budgetable.getRequestsExecuted()
+          : initialGeminiRequests;
+      return total - initialGeminiRequests;
+    };
+
     try {
-      // 1. Recover stale processing jobs (zombies from previous timeouts or crashes)
-      const staleRecovery = await recoverStaleProcessingJobs(db, {
-        staleThresholdMs,
-        maxRetries,
-      });
-      summary.staleJobsRecovered = staleRecovery.recoveredCount;
+      if (!haltBeforeQueue) {
+        // 1. Recover expired processing leases before selecting new work.
+        const staleRecovery = await recoverStaleProcessingJobs(db, {
+          staleThresholdMs,
+          maxRetries,
+        });
+        summary.staleJobsRecovered = staleRecovery.recoveredCount;
 
-      // 2. Telemetry: Count currently eligible stories in queue
-      const queueCounts = await countEligibleStoriesInQueue(db, maxRetries);
-      summary.storiesEligible = queueCounts.eligible;
-      summary.storiesScanned = queueCounts.pending + queueCounts.failed;
+        // 2. Telemetry: Count currently eligible stories in queue.
+        const queueCounts = await countEligibleStoriesInQueue(db, maxRetries);
+        summary.storiesEligible = queueCounts.eligible;
+        summary.storiesScanned = queueCounts.pending + queueCounts.failed;
 
-      // 3. Atomically claim bounded batch of eligible stories
-      const claimedStories = await claimNextStoryBatch(db, {
-        batchSize,
-        maxRetries,
-      });
-      summary.storiesClaimed = claimedStories.length;
-
-      let rateLimitEncountered = false;
-
-      for (let i = 0; i < claimedStories.length; i++) {
-        const story = claimedStories[i];
-
-        // A. Execution Time Watchdog: ensure sufficient headroom remains for synthesis
-        const elapsed = Date.now() - startTime;
-        const remainingTimeMs = maxRuntimeMs - elapsed;
-        if (remainingTimeMs < 30000 && i > 0) {
+        // Do not claim work unless research, one Gemini attempt, and cleanup fit.
+        if (Date.now() + geminiTimeoutMs + shutdownHeadroomMs >= deadlineAt) {
           summary.stopReason = 'WATCHDOG_DEADLINE';
-          // Release remaining unstarted stories back to 'pending' without penalty
-          for (let j = i; j < claimedStories.length; j++) {
-            await releaseStoryToPending(db, claimedStories[j].id);
-            summary.storiesSkipped++;
-          }
-          break;
-        }
-
-        // B. Gemini Request Budget Check
-        const currentGeminiRequests =
-          typeof budgetable?.getRequestsExecuted === 'function'
-            ? budgetable.getRequestsExecuted()
-            : 0;
-        const requestsUsedSoFar = currentGeminiRequests - initialGeminiRequests;
-
-        if (requestsUsedSoFar >= geminiBudget) {
-          summary.stopReason = 'BUDGET_EXHAUSTED';
-          for (let j = i; j < claimedStories.length; j++) {
-            await releaseStoryToPending(db, claimedStories[j].id);
-            summary.storiesSkipped++;
-          }
-          break;
-        }
-
-        // C. Rate limit guard
-        if (rateLimitEncountered) {
-          summary.errors.push(
-            `Rate limit active: deferred story "${story.title}" to protect API quota.`
-          );
-          await releaseStoryToPending(db, story.id);
-          summary.storiesSkipped++;
-          continue;
-        }
-
-        let currentStage: FailureStage = 'research';
-
-        try {
-          const evidencePacket = await this.researcher.buildEvidencePacket(story.id, {
-            deterministicOnly: options?.deterministicEvidence !== false,
+        } else {
+          // 3. Atomically claim a bounded batch of eligible stories.
+          const claimedStories = await claimNextStoryBatch(db, {
+            batchSize,
+            maxRetries,
           });
-          currentStage = 'writing';
+          summary.storiesClaimed = claimedStories.length;
+          for (const story of claimedStories) activeClaimIds.add(story.id);
 
-          // Pass publication intent explicitly based on upstream editorial decision
-          const publicationIntent =
-            story.editorialStatus === 'auto_approved' ? 'published' : 'review_pending';
-
-          const savedArticle = await this.writer.synthesizeStoryArticle(evidencePacket, {
-            publicationIntent,
-            skipIfAlreadyPublished: true,
-          });
-
-          if (savedArticle.status === 'published') {
-            summary.autoApprovedArticlesPublished++;
-            await revalidatePublishedContent(savedArticle.slug);
-          }
-        } catch (err) {
-          const classification = classifyError(err);
-
-          // Handle Gemini budget exceeded stop (Not a failure on the story)
-          if (classification.isBudgetExceeded) {
-            summary.stopReason = 'BUDGET_EXHAUSTED';
-            await releaseStoryToPending(db, story.id);
-            summary.storiesSkipped++;
-            // Release remaining claimed stories
-            for (let j = i + 1; j < claimedStories.length; j++) {
-              await releaseStoryToPending(db, claimedStories[j].id);
+          const releaseFrom = async (
+            startIndex: number,
+            releaseOptions?: Parameters<typeof releaseStoryToPending>[2]
+          ) => {
+            for (let j = startIndex; j < claimedStories.length; j++) {
+              const claimed = claimedStories[j];
+              if (!activeClaimIds.has(claimed.id)) continue;
+              await releaseStoryToPending(db, claimed.id, releaseOptions);
+              activeClaimIds.delete(claimed.id);
               summary.storiesSkipped++;
             }
-            break;
-          }
+          };
 
-          if (classification.isRateLimit) {
-            rateLimitEncountered = true;
-            summary.quotaEncountered = true;
-            summary.stopReason = 'QUOTA_EXHAUSTED';
-          }
+          for (let i = 0; i < claimedStories.length; i++) {
+            const story = claimedStories[i];
 
-          const currentRetries = story.retryCount || 0;
-          const nextRetryCount = currentRetries + 1;
-          const isExhausted = nextRetryCount >= maxRetries;
-          const isFinal = !classification.isRetryable || isExhausted;
+            if (Date.now() + geminiTimeoutMs + shutdownHeadroomMs >= deadlineAt) {
+              summary.stopReason = 'WATCHDOG_DEADLINE';
+              await releaseFrom(i, {
+                failureReason: 'Worker deadline approached before synthesis began.',
+                failureStage: 'timeout',
+              });
+              break;
+            }
 
-          if (isFinal) {
-            summary.storiesFailed++;
-          } else {
-            summary.storiesRetried++;
-          }
+            if (getAttemptsUsed() >= geminiBudget) {
+              summary.stopReason = 'BUDGET_EXHAUSTED';
+              await releaseFrom(i, {
+                failureReason: 'Shared Gemini attempt budget exhausted before synthesis.',
+                failureStage: 'writing',
+              });
+              break;
+            }
 
-          // Move editorial_status to 'needs_review' if non-retryable or max retries exceeded
-          await db
-            .update(schema.stories)
-            .set({
-              editorialStatus: isFinal ? 'needs_review' : 'auto_approved',
-              processingStatus: 'failed',
-              retryCount: nextRetryCount,
-              failureReason: classification.reason,
-              failureStage: currentStage,
-              lastAttemptedAt: new Date(),
-              lastUpdatedAt: new Date(),
-            })
-            .where(eq(schema.stories.id, story.id));
+            let currentStage: FailureStage = 'research';
 
-          const message = err instanceof Error ? err.message : String(err);
-          summary.errors.push(
-            `Story "${story.title}" failed at stage [${currentStage}] (attempt ${nextRetryCount}/${maxRetries}, retryable: ${classification.isRetryable}): ${message}`
-          );
+            try {
+              const evidencePacket = await this.researcher.buildEvidencePacket(story.id, {
+                deterministicOnly: options?.deterministicEvidence !== false,
+                maxSourceEnrichments: options?.maxSourceEnrichments ?? (processQueueOnly ? 2 : undefined),
+                externalFetchTimeoutMs: options?.researchFetchTimeoutMs ?? PIPELINE_RESEARCH_FETCH_TIMEOUT_MS,
+                deadlineAt,
+                shutdownHeadroomMs: shutdownHeadroomMs + geminiTimeoutMs,
+              });
+              currentStage = 'writing';
 
-          if (classification.isRateLimit) {
-            // Immediately release any remaining claimed stories to pending
-            for (let j = i + 1; j < claimedStories.length; j++) {
-              await releaseStoryToPending(db, claimedStories[j].id);
+              if (Date.now() + geminiTimeoutMs + shutdownHeadroomMs >= deadlineAt) {
+                summary.stopReason = 'WATCHDOG_DEADLINE';
+                await releaseFrom(i, {
+                  failureReason: 'Worker deadline approached after research; synthesis was not attempted.',
+                  failureStage: 'timeout',
+                });
+                break;
+              }
+
+              const publicationIntent =
+                story.editorialStatus === 'auto_approved' ? 'published' : 'review_pending';
+              const savedArticle = await this.writer.synthesizeStoryArticle(evidencePacket, {
+                publicationIntent,
+                skipIfAlreadyPublished: true,
+              });
+
+              activeClaimIds.delete(story.id);
+              if (savedArticle.status === 'published') {
+                summary.autoApprovedArticlesPublished++;
+                try {
+                  await revalidatePublishedContent(savedArticle.slug);
+                } catch (revalidationError) {
+                  const revalidationMessage =
+                    revalidationError instanceof Error
+                      ? revalidationError.message
+                      : String(revalidationError);
+                  summary.errors.push(
+                    `Article "${savedArticle.slug}" persisted, but cache revalidation failed: ${revalidationMessage}`
+                  );
+                }
+              }
+            } catch (err) {
+              const classification = classifyError(err);
+              const message = err instanceof Error ? err.message : String(err);
+
+              if (err instanceof GeminiDeadlineExceededError) {
+                summary.stopReason = 'WATCHDOG_DEADLINE';
+                await releaseFrom(i, {
+                  failureReason: err.message,
+                  failureStage: 'timeout',
+                });
+                break;
+              }
+
+              if (classification.isBudgetExceeded) {
+                summary.stopReason = 'BUDGET_EXHAUSTED';
+                await releaseFrom(i, {
+                  failureReason: classification.reason,
+                  failureStage: currentStage,
+                });
+                break;
+              }
+
+              if (classification.isRateLimit) {
+                summary.quotaEncountered = true;
+                summary.stopReason = 'QUOTA_EXHAUSTED';
+                const providerDelayMs =
+                  err instanceof GeminiQuotaExhaustedError && err.retryDelaySeconds
+                    ? err.retryDelaySeconds * 1000
+                    : 0;
+                const nextAttemptAt = new Date(Date.now() + Math.max(quotaCooldownMs, providerDelayMs));
+                summary.errors.push(`Story "${story.title}" deferred after Gemini quota exhaustion: ${message}`);
+                await releaseFrom(i, {
+                  failureReason: classification.reason,
+                  failureStage: currentStage,
+                  nextAttemptAt,
+                });
+                break;
+              }
+
+              if (classification.isServiceUnavailable && processQueueOnly) {
+                summary.stopReason = 'PROVIDER_UNAVAILABLE';
+                summary.errors.push(`Story "${story.title}" deferred after Gemini 503/unavailable: ${message}`);
+                await releaseFrom(i, {
+                  failureReason: classification.reason,
+                  failureStage: currentStage,
+                  nextAttemptAt: new Date(Date.now() + transientCooldownMs),
+                });
+                break;
+              }
+
+              const currentRetries = story.retryCount || 0;
+              const nextRetryCount = currentRetries + 1;
+              const isExhausted = nextRetryCount >= maxRetries;
+              const isFinal = !classification.isRetryable || isExhausted;
+
+              if (isFinal) summary.storiesFailed++;
+              else summary.storiesRetried++;
+
+              await db
+                .update(schema.stories)
+                .set({
+                  editorialStatus: isFinal ? 'needs_review' : 'auto_approved',
+                  processingStatus: 'failed',
+                  retryCount: nextRetryCount,
+                  failureReason: classification.reason,
+                  failureStage: currentStage,
+                  lastAttemptedAt: new Date(),
+                  nextAttemptAt: isFinal ? null : new Date(Date.now() + transientCooldownMs),
+                  lastUpdatedAt: new Date(),
+                })
+                .where(eq(schema.stories.id, story.id));
+              activeClaimIds.delete(story.id);
+
               summary.errors.push(
-                `Rate limit active: deferred story "${claimedStories[j].title}" to protect API quota.`
+                `Story "${story.title}" failed at stage [${currentStage}] (attempt ${nextRetryCount}/${maxRetries}, retryable: ${classification.isRetryable}): ${message}`
               );
-              summary.storiesSkipped++;
             }
-            break;
+          }
+
+          if (summary.stopReason === 'COMPLETED' && summary.storiesClaimed >= batchSize) {
+            summary.stopReason = 'BATCH_LIMIT_REACHED';
           }
         }
-      }
-
-      // Determine final stopReason if all claimed items finished
-      if (summary.stopReason === 'COMPLETED' && summary.storiesClaimed >= batchSize) {
-        summary.stopReason = 'BATCH_LIMIT_REACHED';
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       summary.errors.push(`Step 3 dispatch error: ${message}`);
       summary.stopReason = 'FATAL_ERROR';
+    } finally {
+      for (const storyId of activeClaimIds) {
+        await releaseStoryToPending(db, storyId, {
+          failureReason: 'Worker exited before the claimed story completed.',
+          failureStage: 'timeout',
+          nextAttemptAt: new Date(Date.now() + transientCooldownMs),
+        });
+      }
+      activeClaimIds.clear();
     }
 
     // Calculate final Gemini requests used
     const finalGeminiRequests =
-      typeof budgetable?.getRequestsExecuted === 'function'
+      typeof budgetable?.getAttemptsExecuted === 'function'
+        ? budgetable.getAttemptsExecuted()
+        : typeof budgetable?.getRequestsExecuted === 'function'
         ? budgetable.getRequestsExecuted()
         : 0;
     summary.geminiRequestsUsed = finalGeminiRequests - initialGeminiRequests;

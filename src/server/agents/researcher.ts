@@ -368,7 +368,13 @@ export class MultiSourceResearcherAgent {
    */
   async buildEvidencePacket(
     storyId: string,
-    options?: { deterministicOnly?: boolean }
+    options?: {
+      deterministicOnly?: boolean;
+      maxSourceEnrichments?: number;
+      externalFetchTimeoutMs?: number;
+      deadlineAt?: number;
+      shutdownHeadroomMs?: number;
+    }
   ): Promise<EvidencePacket> {
     const db = await getDb();
 
@@ -444,6 +450,22 @@ export class MultiSourceResearcherAgent {
       return bOfficial - aOfficial;
     });
 
+    const maxSourceEnrichments = options?.maxSourceEnrichments ?? Number.POSITIVE_INFINITY;
+    const configuredFetchTimeoutMs = options?.externalFetchTimeoutMs ?? 5000;
+    const shutdownHeadroomMs = options?.shutdownHeadroomMs ?? 0;
+    let sourceEnrichments = 0;
+    const reserveEnrichment = (): number | null => {
+      if (sourceEnrichments >= maxSourceEnrichments) return null;
+      let timeoutMs = configuredFetchTimeoutMs;
+      if (options?.deadlineAt) {
+        const remaining = options.deadlineAt - Date.now() - shutdownHeadroomMs;
+        if (remaining <= 250) return null;
+        timeoutMs = Math.min(timeoutMs, remaining);
+      }
+      sourceEnrichments++;
+      return Math.max(1, timeoutMs);
+    };
+
     // Deep Primary Source Enrichment:
     // Treat RSS as discovery metadata: attempt Jina Reader extraction from canonical URL
     // regardless of RSS description length. Keep RSS text as fallback if extraction fails.
@@ -451,8 +473,15 @@ export class MultiSourceResearcherAgent {
       if (pSrc.url && pSrc.url.startsWith('http')) {
         const originalRssText = pSrc.text || '';
         pSrc.retrievedAt = new Date().toISOString();
+        const timeoutMs = reserveEnrichment();
+        if (timeoutMs === null) {
+          pSrc.extractionStatus = 'fallback_rss';
+          pSrc.retrievalStatus = 'fallback';
+          pSrc.provenance = `RSS feed fallback from ${pSrc.url}`;
+          continue;
+        }
         try {
-          const fullMarkdown = await extractCleanMarkdown(pSrc.url, originalRssText);
+          const fullMarkdown = await extractCleanMarkdown(pSrc.url, originalRssText, { timeoutMs });
           if (fullMarkdown && fullMarkdown.trim().length > 0) {
             pSrc.text = fullMarkdown;
             pSrc.extractionStatus = 'jina_extracted';
@@ -487,8 +516,15 @@ export class MultiSourceResearcherAgent {
       if (sSrc.url && sSrc.url.startsWith('http')) {
         const originalText = sSrc.text || '';
         sSrc.retrievedAt = new Date().toISOString();
+        const timeoutMs = reserveEnrichment();
+        if (timeoutMs === null) {
+          sSrc.extractionStatus = 'fallback_rss';
+          sSrc.retrievalStatus = 'fallback';
+          sSrc.provenance = `Secondary metadata fallback from ${sSrc.url}`;
+          continue;
+        }
         try {
-          const fullMarkdown = await extractCleanMarkdown(sSrc.url, originalText);
+          const fullMarkdown = await extractCleanMarkdown(sSrc.url, originalText, { timeoutMs });
           if (fullMarkdown && fullMarkdown.trim().length > 0) {
             sSrc.text = fullMarkdown;
             sSrc.extractionStatus = 'jina_extracted';

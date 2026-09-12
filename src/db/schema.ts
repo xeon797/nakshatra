@@ -282,12 +282,14 @@ export const stories = pgTable(
     failureReason: text('failure_reason'),
     failureStage: varchar('failure_stage', { length: 50 }),
     lastAttemptedAt: timestamp('last_attempted_at', { withTimezone: true }),
+    nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }),
   },
   (table) => [
     index('idx_stories_editorial_status').on(table.editorialStatus),
     index('idx_stories_category').on(table.category),
     index('idx_stories_first_seen_at').on(table.firstSeenAt),
     index('idx_stories_processing_status').on(table.processingStatus),
+    index('idx_stories_next_attempt_at').on(table.nextAttemptAt),
   ]
 );
 

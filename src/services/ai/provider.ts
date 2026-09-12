@@ -23,6 +23,15 @@ export interface AiStructuredResponse<T> {
   modelUsed: string;
 }
 
+export interface AiExecutionPolicy {
+  attemptBudget?: number | null;
+  maxRetries?: number;
+  requestTimeoutMs?: number;
+  deadlineAt?: number | null;
+  shutdownHeadroomMs?: number;
+  allowModelFallback?: boolean;
+}
+
 export interface AiModelProvider {
   readonly providerName: string;
   readonly defaultModel: string;
@@ -34,4 +43,7 @@ export interface AiModelProvider {
     schema: z.ZodType<T>,
     options?: AiCallOptions
   ): Promise<AiStructuredResponse<T>>;
+
+  configureExecutionPolicy?(policy: AiExecutionPolicy): void;
+  getAttemptsExecuted?(): number;
 }

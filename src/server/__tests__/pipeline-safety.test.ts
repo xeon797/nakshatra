@@ -113,7 +113,7 @@ describe('Production Pipeline Safety & Hardening (Forensic Fix Verification)', (
     });
 
     // Cycle 1: Attempt 1 fails (retryable, retryCount becomes 1, status remains auto_approved)
-    const summary1 = await worker.runCycle({ maxRetries: 3 });
+    const summary1 = await worker.runCycle({ maxRetries: 3, transientCooldownMs: 0 });
     expect(summary1.autoApprovedArticlesPublished).toBe(0);
     expect(summary1.errors.length).toBe(1);
 
@@ -131,7 +131,7 @@ describe('Production Pipeline Safety & Hardening (Forensic Fix Verification)', (
       .where(eq(schema.stories.id, story.id));
 
     // Cycle 2: Attempt 2 fails (retryCount becomes 2)
-    await worker.runCycle({ maxRetries: 3 });
+    await worker.runCycle({ maxRetries: 3, transientCooldownMs: 0 });
     const [afterCycle2] = await db.select().from(schema.stories).where(eq(schema.stories.id, story.id));
     expect(afterCycle2.retryCount).toBe(2);
     expect(afterCycle2.editorialStatus).toBe('auto_approved');
@@ -144,7 +144,7 @@ describe('Production Pipeline Safety & Hardening (Forensic Fix Verification)', (
 
     // Cycle 3: Attempt 3 fails -> Max retries reached (3/3)
     // Editorial status transitions to 'needs_review', stopping all further automatic attempts!
-    await worker.runCycle({ maxRetries: 3 });
+    await worker.runCycle({ maxRetries: 3, transientCooldownMs: 0 });
     const [afterCycle3] = await db.select().from(schema.stories).where(eq(schema.stories.id, story.id));
     expect(afterCycle3.retryCount).toBe(3);
     expect(afterCycle3.editorialStatus).toBe('needs_review');
@@ -152,7 +152,7 @@ describe('Production Pipeline Safety & Hardening (Forensic Fix Verification)', (
 
     // Cycle 4: Subsequent automatic runs must NOT touch the story again
     mockWriter.synthesizeStoryArticle.mockClear();
-    await worker.runCycle({ maxRetries: 3 });
+    await worker.runCycle({ maxRetries: 3, transientCooldownMs: 0 });
     expect(mockWriter.synthesizeStoryArticle).not.toHaveBeenCalled();
   });
 
@@ -285,14 +285,20 @@ describe('Production Pipeline Safety & Hardening (Forensic Fix Verification)', (
 
     const summary = await worker.runCycle();
 
-    // Story 1 attempted once and failed
+    // Story 1 attempted once, then returned to pending with a cooldown.
     expect(mockWriter.synthesizeStoryArticle).toHaveBeenCalledTimes(1);
+
+    const [s1] = await db.select().from(schema.stories).where(eq(schema.stories.id, _story1.id));
+    expect(s1.retryCount).toBe(0);
+    expect(s1.processingStatus).toBe('pending');
+    expect(s1.nextAttemptAt).toBeInstanceOf(Date);
 
     // Story 2 was deferred to preserve quota, not called
     const [s2] = await db.select().from(schema.stories).where(eq(schema.stories.id, story2.id));
     expect(s2.retryCount).toBe(0);
     expect(s2.processingStatus).toBe('pending');
-    expect(summary.errors.some((e) => e.includes('Rate limit active: deferred story'))).toBe(true);
+    expect(summary.stopReason).toBe('QUOTA_EXHAUSTED');
+    expect(summary.errors.some((e) => e.includes('deferred after Gemini quota exhaustion'))).toBe(true);
   });
 
   // ───────────────────────────────────────────────────────────────────────────

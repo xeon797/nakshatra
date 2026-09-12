@@ -415,22 +415,23 @@ describe('STEP 7: Autonomous Production Worker, Queue Hardening & Backlog Recove
     expect(recoveryResult.recoveredStoryIds).toContain(exhaustedStory.id);
     expect(recoveryResult.recoveredStoryIds).not.toContain(activeStory.id);
 
-    // Story 1 recovered to failed with retryCount = 1 (eligible for retry after backoff)
+    // A crashed lease is infrastructure recovery, so it returns to pending
+    // without consuming a synthesis retry.
     const [afterS1] = await db.select().from(schema.stories).where(eq(schema.stories.id, staleStory.id));
-    expect(afterS1.processingStatus).toBe('failed');
+    expect(afterS1.processingStatus).toBe('pending');
     expect(afterS1.editorialStatus).toBe('auto_approved');
-    expect(afterS1.retryCount).toBe(1);
+    expect(afterS1.retryCount).toBe(0);
     expect(afterS1.failureStage).toBe('timeout');
 
     // Story 2 remains actively processing
     const [afterS2] = await db.select().from(schema.stories).where(eq(schema.stories.id, activeStory.id));
     expect(afterS2.processingStatus).toBe('processing');
 
-    // Story 3 moved to needs_review because maxRetries (3) reached
+    // Existing retry history is preserved; lease recovery does not add a retry.
     const [afterS3] = await db.select().from(schema.stories).where(eq(schema.stories.id, exhaustedStory.id));
-    expect(afterS3.editorialStatus).toBe('needs_review');
-    expect(afterS3.processingStatus).toBe('failed');
-    expect(afterS3.retryCount).toBe(3);
+    expect(afterS3.editorialStatus).toBe('auto_approved');
+    expect(afterS3.processingStatus).toBe('pending');
+    expect(afterS3.retryCount).toBe(2);
   });
 
   // ───────────────────────────────────────────────────────────────────────────
@@ -479,10 +480,12 @@ describe('STEP 7: Autonomous Production Worker, Queue Hardening & Backlog Recove
     expect(summary.stopReason).toBe('QUOTA_EXHAUSTED');
     expect(summary.autoApprovedArticlesPublished).toBe(0);
 
-    // Story 1 was marked failed with backoff and retryCount = 1
+    // Quota exhaustion does not consume a content retry. The attempted story
+    // returns to pending with a cooldown.
     const [afterS1] = await db.select().from(schema.stories).where(eq(schema.stories.id, s1.id));
-    expect(afterS1.processingStatus).toBe('failed');
-    expect(afterS1.retryCount).toBe(1);
+    expect(afterS1.processingStatus).toBe('pending');
+    expect(afterS1.retryCount).toBe(0);
+    expect(afterS1.nextAttemptAt?.getTime()).toBeGreaterThan(Date.now());
 
     // Story 2 was released back to pending with retryCount = 0!
     const [afterS2] = await db.select().from(schema.stories).where(eq(schema.stories.id, s2.id));
