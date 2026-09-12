@@ -93,14 +93,12 @@ describe('Newsletter Automated Dispatch Cron (/api/cron/newsletter)', () => {
     expect(campaign.sentAt).toBeDefined();
   });
 
-  it('authenticates successfully via ?secret= query parameter', async () => {
+  it('rejects ?secret= query parameter authentication', async () => {
     const req = new Request(`http://localhost:3000/api/cron/newsletter?secret=${CRON_SECRET}`, {
       method: 'GET',
     });
 
     const res = await handleNewsletterCron(req);
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.success).toBe(true);
+    expect(res.status).toBe(401);
   });
 });

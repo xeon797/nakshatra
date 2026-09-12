@@ -1,13 +1,18 @@
-import { describe, it, expect } from 'vitest';
+import { beforeAll, describe, it, expect } from 'vitest';
 import { verifyAdminSecret, timingSafeCompare, getAdminSecret, ADMIN_COOKIE_NAME } from '../auth';
 import { middleware } from '../../middleware';
 import { NextRequest } from 'next/server';
 
 describe('Security Layer: Authentication & Timing-Safe Verification', () => {
-  const currentSecret = getAdminSecret();
+  const currentSecret = 'test-admin-secret-2026';
+
+  beforeAll(() => {
+    process.env.ADMIN_API_SECRET = currentSecret;
+  });
 
   describe('Secret Verification', () => {
     it('approves exact matching secret', () => {
+      expect(getAdminSecret()).toBe(currentSecret);
       expect(verifyAdminSecret(currentSecret)).toBe(true);
     });
 

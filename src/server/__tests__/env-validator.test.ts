@@ -131,10 +131,10 @@ describe('Environment Variable Validator & Security Auditing', () => {
       expect(verifyCronSecret(req)).toBe(true);
     });
 
-    it('verifies valid ?secret= query parameter', () => {
+    it('rejects a valid secret passed in the query string', () => {
       process.env.CRON_SECRET = secret;
       const req = new Request(`http://localhost:3000/api/cron/pipeline?secret=${secret}`);
-      expect(verifyCronSecret(req)).toBe(true);
+      expect(verifyCronSecret(req)).toBe(false);
     });
 
     it('rejects incorrect secret in both header and query', () => {

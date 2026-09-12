@@ -5,7 +5,7 @@ import * as schema from '../../db/schema';
 import { eq } from 'drizzle-orm';
 import { ArticleManager } from '../../services/editorial/article-manager';
 import { AutonomousPhase2Worker } from '../worker';
-import { verifyCronSecret, getValidCronSecrets } from '../../lib/auth';
+import { verifyCronSecret } from '../../lib/auth';
 import * as revalModule from '../../lib/revalidation';
 
 describe('STEP 8: Live Website Population & Autonomous Pipeline Resilience', () => {
@@ -197,28 +197,28 @@ describe('STEP 8: Live Website Population & Autonomous Pipeline Resilience', () 
   // ─────────────────────────────────────────────────────────────────────────
   // 4. Worker scheduling configuration is valid
   // ─────────────────────────────────────────────────────────────────────────
-  it('4. Worker scheduling configuration and multi-tier authentication are valid', () => {
-    const validSecrets = getValidCronSecrets();
-    expect(validSecrets).toContain('nakshatra-cron-secret-2026');
-    expect(validSecrets).toContain('dev-cron-secret-nakshatra');
+  it('4. Worker scheduling authentication accepts only the configured cron Bearer token', () => {
+    process.env.CRON_SECRET = 'configured-cron-secret-2026';
+    process.env.ADMIN_API_SECRET = 'separate-admin-secret-2026';
 
-    // 1. Authorized via Bearer token
     const bearerReq = new Request('http://localhost:3000/api/cron/pipeline', {
-      headers: { Authorization: 'Bearer nakshatra-cron-secret-2026' },
+      headers: { Authorization: 'Bearer configured-cron-secret-2026' },
     });
     expect(verifyCronSecret(bearerReq)).toBe(true);
 
-    // 2. Authorized via query param
-    const queryReq = new Request('http://localhost:3000/api/cron/pipeline?secret=nakshatra-cron-secret-2026');
-    expect(verifyCronSecret(queryReq)).toBe(true);
+    const adminReq = new Request('http://localhost:3000/api/cron/pipeline', {
+      headers: { Authorization: 'Bearer separate-admin-secret-2026' },
+    });
+    expect(verifyCronSecret(adminReq)).toBe(false);
 
-    // 3. Authorized via Vercel platform cron header
+    const queryReq = new Request('http://localhost:3000/api/cron/pipeline?secret=configured-cron-secret-2026');
+    expect(verifyCronSecret(queryReq)).toBe(false);
+
     const vercelCronReq = new Request('http://localhost:3000/api/cron/pipeline', {
       headers: { 'x-vercel-cron': '1' },
     });
-    expect(verifyCronSecret(vercelCronReq)).toBe(true);
+    expect(verifyCronSecret(vercelCronReq)).toBe(false);
 
-    // 4. Rejected when unauthorized
     const unauthReq = new Request('http://localhost:3000/api/cron/pipeline');
     expect(verifyCronSecret(unauthReq)).toBe(false);
 

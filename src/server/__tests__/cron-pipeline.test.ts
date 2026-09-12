@@ -8,9 +8,11 @@ import { AutonomousPhase2Worker } from '../worker';
 
 describe('Production Cron Pipeline Route (/api/cron/pipeline)', () => {
   const CRON_SECRET = 'test-cron-secret-2026';
+  const ADMIN_SECRET = 'test-admin-secret-2026';
 
   beforeEach(async () => {
     process.env.CRON_SECRET = CRON_SECRET;
+    process.env.ADMIN_API_SECRET = ADMIN_SECRET;
     resetDbForTesting();
     await ensureDatabaseInitialized();
   });
@@ -79,27 +81,25 @@ describe('Production Cron Pipeline Route (/api/cron/pipeline)', () => {
     expect(runs[0].status).toBe('success');
   });
 
-  it('authenticates successfully via query parameter ?secret=', async () => {
+  it('rejects a correct secret supplied through the query string', async () => {
     const req = new Request(`http://localhost:3000/api/cron/pipeline?secret=${CRON_SECRET}`, {
       method: 'GET',
     });
+    expect((await handlePipelineCron(req)).status).toBe(401);
+  });
 
-    const mockWorker = {
-      runCycle: async () => ({
-        sourcesPolled: 2,
-        sourcesProcessed: 1,
-        rawArticlesIngested: 1,
-        clustersCreated: 0,
-        autoApprovedArticlesPublished: 0,
-        errors: [],
-      }),
-    } as unknown as AutonomousPhase2Worker;
+  it('does not authorize the admin secret for cron access', async () => {
+    const req = new Request('http://localhost:3000/api/cron/pipeline', {
+      headers: { authorization: `Bearer ${ADMIN_SECRET}` },
+    });
+    expect((await handlePipelineCron(req)).status).toBe(401);
+  });
 
-    const res = await handlePipelineCron(req, mockWorker);
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.success).toBe(true);
-    expect(body.metrics.sourcesPolled).toBe(2);
+  it('does not trust a spoofed Vercel cron header', async () => {
+    const req = new Request('http://localhost:3000/api/cron/pipeline', {
+      headers: { 'x-vercel-cron': '1' },
+    });
+    expect((await handlePipelineCron(req)).status).toBe(401);
   });
 
   it('skips execution when in-database concurrency lock is currently active', async () => {

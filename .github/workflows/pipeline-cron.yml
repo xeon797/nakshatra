@@ -1,0 +1,29 @@
+name: Nakshatra autonomous publishing
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: nakshatra-production-pipeline
+  cancel-in-progress: false
+
+jobs:
+  trigger-pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Trigger one bounded production cycle
+        env:
+          CRON_SECRET: ${{ secrets.NAKSHATRA_CRON_SECRET }}
+          PRODUCTION_URL: ${{ vars.NAKSHATRA_PRODUCTION_URL || 'https://nakshatra-pearl.vercel.app' }}
+        run: |
+          set -euo pipefail
+          test -n "${CRON_SECRET}"
+          curl --fail-with-body --silent --show-error \
+            --connect-timeout 5 \
+            --max-time 55 \
+            --request POST \
+            --header "Authorization: Bearer ${CRON_SECRET}" \
+            "${PRODUCTION_URL%/}/api/cron/pipeline?batchSize=1&geminiBudget=2&skipIngestion=true"

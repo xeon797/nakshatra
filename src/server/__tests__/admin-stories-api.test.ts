@@ -10,6 +10,7 @@ import { eq } from 'drizzle-orm';
 
 describe('Module 3: Admin Review API Routes', () => {
   beforeAll(async () => {
+    process.env.ADMIN_API_SECRET = 'test-admin-secret-2026';
     resetDbForTesting();
     await initializeDatabase();
   });
