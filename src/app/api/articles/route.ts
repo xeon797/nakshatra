@@ -1,15 +1,19 @@
 import { NextResponse } from 'next/server';
 import { ArticleManager } from '../../../services/editorial/article-manager';
-import { ensureDatabaseInitialized } from '../../../db/init';
 
 export const dynamic = 'force-dynamic';
+export const maxDuration = 15;
 
 export async function GET(req: Request) {
   try {
-    await ensureDatabaseInitialized();
     const url = new URL(req.url);
-    const limit = Math.min(Math.max(parseInt(url.searchParams.get('limit') || '12', 10), 1), 50);
-    const offset = Math.max(parseInt(url.searchParams.get('offset') || '0', 10), 0);
+    const parsedLimit = Number(url.searchParams.get('limit') ?? 12);
+    const parsedOffset = Number(url.searchParams.get('offset') ?? 0);
+    if (!Number.isSafeInteger(parsedLimit) || !Number.isSafeInteger(parsedOffset) || parsedLimit < 1 || parsedOffset < 0) {
+      return NextResponse.json({ success: false, error: 'Invalid pagination parameters' }, { status: 400 });
+    }
+    const limit = Math.min(parsedLimit, 50);
+    const offset = parsedOffset;
     const category = url.searchParams.get('category');
     const search = url.searchParams.get('search')?.trim().toLowerCase();
 

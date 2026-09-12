@@ -45,12 +45,17 @@ export function getPgliteDataDir(): string | undefined {
 }
 
 export async function getDb(): Promise<AppDatabase> {
+  const requiresPostgres = process.env.NODE_ENV === 'production' || Boolean(process.env.VERCEL);
+  const configuredUrl = process.env.DATABASE_URL?.trim();
+  if (requiresPostgres && (!configuredUrl || configuredUrl.includes('placeholder'))) {
+    throw new Error('[DB] DATABASE_URL is required in production. Embedded PGlite fallback is disabled.');
+  }
   if (cachedDb) {
     return cachedDb;
   }
 
   const isTest = process.env.NODE_ENV === 'test' || Boolean(process.env.VITEST);
-  const databaseUrl = isTest && !process.env.TEST_WITH_REAL_DB ? undefined : process.env.DATABASE_URL;
+  const databaseUrl = isTest && !requiresPostgres && !process.env.TEST_WITH_REAL_DB ? undefined : configuredUrl;
 
   if (databaseUrl && !databaseUrl.includes('placeholder')) {
     try {
@@ -73,13 +78,11 @@ export async function getDb(): Promise<AppDatabase> {
       cachedDb = drizzlePg(activePool, { schema });
       return cachedDb;
     } catch (err) {
+      if (requiresPostgres) {
+        throw new Error('[DB] PostgreSQL configuration failed. Embedded PGlite fallback is disabled.', { cause: err });
+      }
       console.warn('[DB] Failed to connect to external PostgreSQL, falling back to embedded PGlite:', err);
     }
-  } else if (process.env.NODE_ENV === 'production') {
-    console.warn(
-      '[DB WARNING] DATABASE_URL is not configured in production environment variables. ' +
-      'Falling back to temporary embedded PGlite. Configure DATABASE_URL in Vercel project settings to persist data to Neon PostgreSQL.'
-    );
   }
 
   // Embedded PostgreSQL (PGlite):

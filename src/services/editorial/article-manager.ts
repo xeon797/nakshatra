@@ -1,6 +1,6 @@
 import { getDb } from '../../db';
 import * as schema from '../../db/schema';
-import { eq, desc, and, sql } from 'drizzle-orm';
+import { eq, desc, and, sql, inArray } from 'drizzle-orm';
 import { SynthesisResult, VerifiedClaimInput } from './synthesis-agent';
 import { revalidatePublishedContent } from '../../lib/revalidation';
 
@@ -351,7 +351,7 @@ export class ArticleManager {
       .select()
       .from(schema.articles)
       .where(eq(schema.articles.status, 'published'))
-      .orderBy(desc(schema.articles.publishedAt))
+      .orderBy(desc(schema.articles.publishedAt), desc(schema.articles.id))
       .limit(limit)
       .offset(offset);
   }
@@ -369,51 +369,55 @@ export class ArticleManager {
       .from(schema.articles)
       .leftJoin(schema.stories, eq(schema.articles.storyId, schema.stories.id))
       .where(eq(schema.articles.status, 'published'))
-      .orderBy(desc(schema.articles.publishedAt))
+      .orderBy(desc(schema.articles.publishedAt), desc(schema.articles.id))
       .limit(limit)
       .offset(offset);
 
-    const enriched = await Promise.all(
-      rows.map(async ({ article, story }) => {
-        let sourcesList: Array<{ name: string; tier?: string; isPrimary?: boolean }> = [];
-        if (story) {
-          const storySourcesList = await db
-            .select({
-              name: schema.sources.name,
-              tier: schema.sources.tier,
-              isPrimary: schema.storySources.isPrimary,
-            })
-            .from(schema.storySources)
-            .innerJoin(schema.rawArticles, eq(schema.storySources.rawArticleId, schema.rawArticles.id))
-            .innerJoin(schema.sources, eq(schema.rawArticles.sourceId, schema.sources.id))
-            .where(eq(schema.storySources.storyId, story.id));
+    const sourcesByStory = new Map<string, Array<{ name: string; tier?: string; isPrimary?: boolean }>>();
+    const storyIds = [...new Set(rows.flatMap(({ story }) => story ? [story.id] : []))];
+    if (storyIds.length > 0) {
+      const linkedSources = await db
+        .select({
+          storyId: schema.storySources.storyId,
+          name: schema.sources.name,
+          tier: schema.sources.tier,
+          isPrimary: schema.storySources.isPrimary,
+        })
+        .from(schema.storySources)
+        .innerJoin(schema.rawArticles, eq(schema.storySources.rawArticleId, schema.rawArticles.id))
+        .innerJoin(schema.sources, eq(schema.rawArticles.sourceId, schema.sources.id))
+        .where(inArray(schema.storySources.storyId, storyIds));
+      for (const { storyId, ...source } of linkedSources) {
+        const list = sourcesByStory.get(storyId) || [];
+        list.push(source);
+        sourcesByStory.set(storyId, list);
+      }
+    }
 
-          sourcesList = storySourcesList;
-        }
+    const fallbackIds = rows
+      .filter(({ story }) => !story || !sourcesByStory.get(story.id)?.length)
+      .map(({ article }) => article.id);
+    const publishersByArticle = new Map<string, Set<string>>();
+    if (fallbackIds.length > 0) {
+      const citations = await db
+        .select({ articleId: schema.articleCitations.articleId, name: schema.articleCitations.sourcePublisher })
+        .from(schema.articleCitations)
+        .where(inArray(schema.articleCitations.articleId, fallbackIds));
+      for (const { articleId, name } of citations) {
+        const publishers = publishersByArticle.get(articleId) || new Set<string>();
+        publishers.add(name);
+        publishersByArticle.set(articleId, publishers);
+      }
+    }
 
-        if (sourcesList.length === 0) {
-          const citations = await db
-            .select({
-              name: schema.articleCitations.sourcePublisher,
-            })
-            .from(schema.articleCitations)
-            .where(eq(schema.articleCitations.articleId, article.id));
-          sourcesList = Array.from(new Set(citations.map((c) => c.name))).map((n) => ({
-            name: n,
-            tier: 'tier_1_primary',
-            isPrimary: true,
-          }));
-        }
-
-        return {
-          ...article,
-          story: story || null,
-          sources: sourcesList,
-        };
-      })
-    );
-
-    return enriched;
+    return rows.map(({ article, story }) => ({
+      ...article,
+      story: story || null,
+      sources: (story && sourcesByStory.get(story.id)) ||
+        [...(publishersByArticle.get(article.id) || [])].map(name => ({
+          name, tier: 'tier_1_primary', isPrimary: true,
+        })),
+    }));
   }
 
   /**

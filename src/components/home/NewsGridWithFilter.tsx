@@ -26,7 +26,7 @@ export interface ArticleCardItem {
   imageUrl?: string | null;
 }
 
-export function NewsGridWithFilter({ articles, totalAvailable }: NewsGridWithFilterProps) {
+export function NewsGridWithFilter({ articles, totalAvailable, initialOffset = articles.length }: NewsGridWithFilterProps) {
   const { language, t } = useLanguage();
   const isBn = language === 'bn';
 
@@ -35,10 +35,12 @@ export function NewsGridWithFilter({ articles, totalAvailable }: NewsGridWithFil
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [selectedTopic, setSelectedTopic] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [nextOffset, setNextOffset] = useState(initialOffset);
 
   useEffect(() => {
     setItems(articles);
-  }, [articles]);
+    setNextOffset(initialOffset);
+  }, [articles, initialOffset]);
 
   const topicTabs = [
     { id: 'all', label: t.allStories },
@@ -133,10 +135,11 @@ export function NewsGridWithFilter({ articles, totalAvailable }: NewsGridWithFil
     if (canLoadMoreFromServer) {
       setIsLoadingMore(true);
       try {
-        const res = await fetch(`/api/articles?offset=${items.length}&limit=12`);
+        const res = await fetch(`/api/articles?offset=${nextOffset}&limit=12`, { signal: AbortSignal.timeout(15000) });
         const data = await res.json();
         if (data.success && Array.isArray(data.articles) && data.articles.length > 0) {
-          setItems((prev) => [...prev, ...data.articles]);
+          setItems((prev) => [...prev, ...data.articles.filter((article: ArticleCardItem) => !prev.some(item => item.id === article.id))]);
+          setNextOffset(data.pagination.offset + data.pagination.limit);
           setVisibleCount((prev) => prev + 12);
         }
       } catch (err) {
@@ -404,4 +407,5 @@ export function NewsGridWithFilter({ articles, totalAvailable }: NewsGridWithFil
 export interface NewsGridWithFilterProps {
   articles: ArticleCardItem[];
   totalAvailable?: number;
+  initialOffset?: number;
 }

@@ -3,10 +3,6 @@
     {
       "path": "/api/newsletter/send",
       "schedule": "0 2 * * *"
-    },
-    {
-      "path": "/api/cron/pipeline",
-      "schedule": "*/15 * * * *"
     }
   ]
 }

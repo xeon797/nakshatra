@@ -1,7 +1,6 @@
 import React from 'react';
 import Link from 'next/link';
 import { ArticleManager } from '../services/editorial/article-manager';
-import { ensureDatabaseInitialized } from '../db/init';
 import { getDb } from '../db';
 import * as schema from '../db/schema';
 import { eq, gte, sql } from 'drizzle-orm';
@@ -22,7 +21,6 @@ export default async function HomePage() {
   let rawPublishedArticles: Awaited<ReturnType<ArticleManager['getPublishedArticlesWithMetadata']>> = [];
 
   try {
-    await ensureDatabaseInitialized();
     const db = await getDb();
 
     // 1. Fetch live pulse statistics
@@ -139,7 +137,11 @@ export default async function HomePage() {
       {/* 3. News Grid & Filtering (Topic Tabs + Search) */}
       <section className="space-y-6">
         <FeedSectionHeading />
-        <NewsGridWithFilter articles={gridArticles} totalAvailable={totalPublishedCount} />
+        <NewsGridWithFilter
+          articles={gridArticles}
+          totalAvailable={totalPublishedCount - (formattedArticles.length > 1 && heroStory ? 1 : 0)}
+          initialOffset={rawPublishedArticles.length}
+        />
       </section>
 
       {/* 4. Embedded Newsletter Capture */}
@@ -147,4 +149,3 @@ export default async function HomePage() {
     </div>
   );
 }
-

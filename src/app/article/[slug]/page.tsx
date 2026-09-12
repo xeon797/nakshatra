@@ -1,7 +1,6 @@
 import React from 'react';
 import { notFound } from 'next/navigation';
 import { ArticleManager } from '../../../services/editorial/article-manager';
-import { ensureDatabaseInitialized } from '../../../db/init';
 import type { Metadata } from 'next';
 import { ArticleView } from '../../../components/article/ArticleView';
 
@@ -13,7 +12,6 @@ interface Props {
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   try {
-    await ensureDatabaseInitialized();
     const { slug } = await params;
     const manager = new ArticleManager();
     const article = await manager.getArticleBySlug(slug);
@@ -39,7 +37,6 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 export default async function ArticlePage({ params }: Props) {
   let article = null;
   try {
-    await ensureDatabaseInitialized();
     const { slug } = await params;
     const manager = new ArticleManager();
     article = await manager.getArticleBySlug(slug);
